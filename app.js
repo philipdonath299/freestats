@@ -227,9 +227,14 @@ class Parser {
         try {
             const dec = decodeHTML(html);
             const rows = dec.split('<tr');
+            let currentDateStr = '';
             for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
-                if (!row.includes('tdNormal') && !row.includes('tdOdd')) continue;
+                if (!row.includes('tdNormal') && !row.includes('tdOdd')) {
+                    const dateMatch = row.match(/\d{4}-\d{2}-\d{2}/);
+                    if (dateMatch) currentDateStr = dateMatch[0];
+                    continue;
+                }
                 const cells = row.split('<td');
                 if (cells.length < 5) continue;
                 let home = '', away = '', raw = 'Scheduled', id = null;
@@ -246,7 +251,11 @@ class Parser {
                         raw = text;
                     }
                 }
-                if (home && away) games.push(Parser._proc(home, away, raw, id));
+                if (home && away) {
+                    const game = Parser._proc(home, away, raw, id);
+                    game.date = currentDateStr;
+                    games.push(game);
+                }
             }
         } catch (e) { console.error('parseSchedule', e); }
         return games;
@@ -496,8 +505,12 @@ async function fetchData() {
         const html = await res.text();
 
         if (currentSection === 'games') {
-            const games = todayFlag ? Parser.parseLive(html) : Parser.parseSchedule(html);
-            if (!todayFlag) allScheduleGames = games;
+            let games = todayFlag ? Parser.parseLive(html) : Parser.parseSchedule(html);
+            if (!todayFlag) {
+                allScheduleGames = games; // Cache full schedule
+                const ymd = dateToYMD(currentDate);
+                games = games.filter(g => g.date === ymd);
+            }
             detectScoreChanges(games);
             startLiveClocks(games);
             const liveCount = games.filter(g => isLiveStatus(g.status)).length;
@@ -980,9 +993,10 @@ UI.calendarInput.addEventListener('change', () => {
 document.querySelectorAll('.sortable').forEach(th => {
     th.addEventListener('click', () => {
         const col = th.dataset.col;
-        if (standingsSort.col === col) standingsSort.asc = !standingsSort.asc;
-        else { standingsSort.col = col; standingsSort.asc = false; }
-        document.querySelectorAll('.sortable').forEach(h => h.classList.toggle('active-sort', h.dataset.col === col));
+        document.querySelectorAll('.sortable').forEach(h => {
+            h.classList.toggle('active-sort', h.dataset.col === col);
+            h.classList.toggle('asc', h.dataset.col === col && standingsSort.asc);
+        });
         fetchData();
     });
 });
