@@ -82,7 +82,9 @@ let pollTimer = null;
 let fetchController = null;
 let searchQuery = '';
 let searchDebounce = null;
+let currentStandingsTab = 'overall'; // overall | home | away | form
 let standingsSort = { col: 'tp', asc: false };
+let latestStandingsRows = [];      // cached parsed raw overall standings
 let allScheduleGames = [];         // cached schedule for form+H2H
 let prevScores = {};               // gameId → {home, away} for animation
 let liveClockMap = {};             // gameId → {startTs, periodElapsed}
@@ -539,10 +541,10 @@ async function fetchData() {
             updateLiveBadge(liveCount);
             renderGames(games);
         } else if (currentSection === 'standings') {
-            const rows = Parser.parseStandings(html);
+            latestStandingsRows = Parser.parseStandings(html);
             // Kick-off form fetch in background
-            fetchFormData(lid).then(formMap => renderStandings(rows, formMap));
-            renderStandings(rows, {});
+            fetchFormData(lid).then(formMap => renderStandings(latestStandingsRows, formMap));
+            renderStandings(latestStandingsRows, {});
             return;
         } else if (currentSection === 'stats') {
             currentStatsTab === 'scorers' ? renderStats(Parser.parseStats(html)) : renderGoalieStats(Parser.parseGoalieStats(html));
@@ -761,8 +763,72 @@ function toggleFav(name, star) {
 }
 
 // ── Render: Standings ──────────────────────────────────────────
+function calculateContextualStandings(baseRows) {
+    if (currentStandingsTab === 'overall') return baseRows;
+
+    const stats = {};
+    baseRows.forEach(r => stats[r.team] = { team: r.team, gp: 0, w: 0, tie: 0, l: 0, gf: 0, ga: 0, tp: 0 });
+
+    const gamesToProcess = allScheduleGames.filter(g => g.status === 'Final');
+
+    // For form, we only process the last 5 games per team
+    const formGames = {};
+    if (currentStandingsTab === 'form') {
+        [...gamesToProcess].reverse().forEach(g => {
+            if (!formGames[g.home.name]) formGames[g.home.name] = [];
+            if (!formGames[g.away.name]) formGames[g.away.name] = [];
+            if (formGames[g.home.name].length < 5) formGames[g.home.name].push(g);
+            if (formGames[g.away.name].length < 5) formGames[g.away.name].push(g);
+        });
+    }
+
+    gamesToProcess.forEach(g => {
+        const h = parseInt(g.home.score) || 0, a = parseInt(g.away.score) || 0;
+        const isOT = g.time.toLowerCase().includes('ot') || g.time.toLowerCase().includes('gws');
+
+        const processTeam = (teamName, isHome) => {
+            if (!stats[teamName]) return;
+            if (currentStandingsTab === 'home' && !isHome) return;
+            if (currentStandingsTab === 'away' && isHome) return;
+            if (currentStandingsTab === 'form' && !formGames[teamName].includes(g)) return;
+
+            const myGoals = isHome ? h : a;
+            const oppGoals = isHome ? a : h;
+
+            stats[teamName].gp++;
+            stats[teamName].gf += myGoals;
+            stats[teamName].ga += oppGoals;
+
+            if (myGoals > oppGoals) {
+                if (isOT) { stats[teamName].tie++; stats[teamName].tp += 2; }
+                else { stats[teamName].w++; stats[teamName].tp += 3; }
+            } else if (myGoals < oppGoals) {
+                if (isOT) { stats[teamName].tie++; stats[teamName].tp += 1; }
+                else { stats[teamName].l++; stats[teamName].tp += 0; }
+            } else {
+                stats[teamName].tie++; stats[teamName].tp += 1; // standard tie
+            }
+        };
+
+        processTeam(g.home.name, true);
+        processTeam(g.away.name, false);
+    });
+
+    const computedRows = Object.values(stats)
+        .filter(s => s.gp > 0)
+        .map(s => ({
+            rank: 0, team: s.team, gp: s.gp, w: s.w, tie: s.tie, l: s.l, gd: (s.gf - s.ga > 0 ? '+' : '') + (s.gf - s.ga), tp: s.tp
+        }))
+        .sort((a, b) => b.tp - a.tp || b.gd - a.gd);
+
+    computedRows.forEach((r, i) => r.rank = i + 1);
+    return computedRows;
+}
+
 function renderStandings(rows, formMap = {}) {
-    const filtered = applySearch(rows);
+    if (!rows || !rows.length) rows = latestStandingsRows;
+    const computed = calculateContextualStandings(rows);
+    const filtered = applySearch(computed);
     const sorted = sortStandings(filtered);
     UI.standingsBody.innerHTML = '';
     if (!sorted.length) { UI.standingsBody.innerHTML = '<tr><td colspan="10" class="empty-state">No data.</td></tr>'; return; }
@@ -905,6 +971,20 @@ function renderDetails(d, game) {
     UI.modalBody.innerHTML = html;
     renderLineups(d.matchInfo);
     renderH2H(game);
+    renderModalStandings(game);
+}
+
+function renderModalStandings(game) {
+    const modalStandingsEl = document.getElementById('modal-standings');
+    if (!latestStandingsRows.length) { modalStandingsEl.innerHTML = '<div class="empty-state">No standings data available. Open the Standings tab first to load.</div>'; return; }
+
+    let html = `<div class="table-wrapper" style="margin-top:0"><table class="data-table"><thead><tr><th class="col-rank">#</th><th class="text-left">Team</th><th>GP</th><th>GD</th><th class="tp-cell">PTS</th></tr></thead><tbody>`;
+    latestStandingsRows.forEach(r => {
+        const isMatchTeam = r.team === game.home.name || r.team === game.away.name;
+        html += `<tr style="${isMatchTeam ? 'background:var(--accent-dim)' : ''}"><td class="col-rank">${r.rank}</td><td class="text-left td-team" style="${isMatchTeam ? 'font-weight:700;color:var(--accent)' : ''}">${r.team}</td><td>${r.gp}</td><td>${r.gd}</td><td class="tp-cell">${r.tp}</td></tr>`;
+    });
+    html += `</tbody></table></div>`;
+    modalStandingsEl.innerHTML = html;
 }
 
 function renderLineups(info) {
@@ -939,6 +1019,8 @@ function switchModalSection(sec) {
     UI.modalBody.classList.toggle('hidden', sec !== 'summary');
     UI.modalLineups.classList.toggle('hidden', sec !== 'lineups');
     UI.modalH2h.classList.toggle('hidden', sec !== 'h2h');
+    const modalStandingsEl = document.getElementById('modal-standings');
+    if (modalStandingsEl) modalStandingsEl.classList.toggle('hidden', sec !== 'standings');
     document.querySelectorAll('.modal-tab').forEach(b => b.classList.toggle('active', b.dataset.modalSection === sec));
 }
 
@@ -1051,6 +1133,15 @@ document.querySelectorAll('.filter-btn[data-filter]').forEach(btn => {
         currentFilter = btn.dataset.filter;
         document.querySelectorAll('.filter-btn[data-filter]').forEach(b => b.classList.toggle('active', b === btn));
         if (currentSection === 'games') fetchData();
+    });
+});
+
+// ── Standings sub-tabs ─────────────────────────────────────────
+document.querySelectorAll('.filter-btn[data-st-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        currentStandingsTab = btn.dataset.stFilter;
+        document.querySelectorAll('.filter-btn[data-st-filter]').forEach(b => b.classList.toggle('active', b === btn));
+        renderStandings(); // re-runs calculateContextualStandings and sorts
     });
 });
 

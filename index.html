@@ -196,6 +196,12 @@
                 <div class="section-breadcrumb">
                     <span>🇸🇪 Sweden</span><span class="bc-sep">›</span><span id="bc-league"></span>
                 </div>
+                <div class="filter-bar" style="margin-bottom:12px" id="standings-filters">
+                    <button class="filter-btn active" data-st-filter="overall">Overall</button>
+                    <button class="filter-btn" data-st-filter="home">Home</button>
+                    <button class="filter-btn" data-st-filter="away">Away</button>
+                    <button class="filter-btn" data-st-filter="form">Form</button>
+                </div>
                 <div class="table-wrapper">
                     <table class="data-table" id="standings-table">
                         <thead>
@@ -254,10 +260,12 @@
             <div id="modal-match-header" class="modal-mh"></div>
             <div class="modal-tabs">
                 <button class="modal-tab active" data-modal-section="summary">Summary</button>
+                <button class="modal-tab" data-modal-section="standings">Standings</button>
                 <button class="modal-tab" data-modal-section="lineups">Lineups</button>
                 <button class="modal-tab" data-modal-section="h2h">H2H</button>
             </div>
             <div id="modal-body"></div>
+            <div id="modal-standings" class="hidden"></div>
             <div id="modal-lineups" class="hidden"></div>
             <div id="modal-h2h" class="hidden"></div>
         </div>
