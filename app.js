@@ -1,5 +1,5 @@
 /* ================================================
-   app.js — Swehockey Live Tracker (Flashscore Edition)
+   app.js — SweHockey Live (Flashscore Edition)
    ================================================ */
 
 const CONFIG = {
@@ -14,150 +14,199 @@ const CONFIG = {
     POLL_INTERVAL: 30000,
 };
 
-// ── UI references ────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const $$ = sel => document.querySelector(sel);
 
 const UI = {
+    // Header
+    sidebarToggle: $('sidebar-toggle'),
+    sidebar: $('sidebar'),
+    sidebarOverlay: $('sidebar-overlay'),
+    sidebarLeagues: $('sidebar-leagues'),
     leagueSelect: $('league-select'),
     refreshBtn: $('refresh-btn'),
-    statusText: $('status-text'),
     statusPill: $('status-pill'),
+    statusDot: $('status-dot'),
+    statusText: $('status-text'),
     lastUpdatedTime: $('last-updated-time'),
-
+    themeBtn: $('theme-btn'),
+    themeMoon: $('theme-moon'),
+    themeSun: $('theme-sun'),
+    notifyBtn: $('notify-btn'),
+    searchWrap: $('search-wrap'),
+    searchToggle: $('search-toggle-btn'),
+    searchInput: $('search-input'),
+    searchClear: $('search-clear-btn'),
+    calendarBtn: $('calendar-btn'),
+    calendarInput: $('calendar-input'),
+    dateStrip: $('date-strip'),
     // Sections
     sectionGames: $('section-games'),
     sectionStandings: $('section-standings'),
     sectionStats: $('section-stats'),
-
-    // Games
     gamesContainer: $('games-container'),
-    liveBtn: $('live-view-btn'),
-    scheduleBtn: $('schedule-view-btn'),
-    favoritesFilterBtn: $('favorites-filter-btn'),
-    gameTemplate: $('game-row-template'),
-
-    // Date navigator
-    dateNav: $('date-nav'),
-    datePrevBtn: $('date-prev-btn'),
-    dateNextBtn: $('date-next-btn'),
-    dateTodayBtn: $('date-today-btn'),
-    dateDisplay: $('date-display'),
-
-    // Standings
     standingsBody: $('standings-body'),
-
-    // Stats
-    statsBody: $('stats-body'),
     statsHeader: $('stats-header'),
-    statsScorersBtn: $('stats-scorers-btn'),
-    statsGoaliesBtn: $('stats-goalies-btn'),
-
-    // Error
+    statsBody: $('stats-body'),
     errorContainer: $('error-container'),
     retryBtn: $('retry-btn'),
-
-    // Loading Templates
-    skeletonGameTemplate: $('skeleton-game-template'),
-    skeletonTableTemplate: $('skeleton-table-template'),
-
+    // Filter
+    liveBadge: $('live-badge'),
+    bcLeague: $('bc-league'),
+    bcStatsLeague: $('bc-stats-league'),
+    // Stats sub-nav
+    statsScorersBtn: $('stats-scorers-btn'),
+    statsGoaliesBtn: $('stats-goalies-btn'),
     // Modal
     modal: $('game-modal'),
+    modalBackdrop: $('modal-backdrop'),
+    closeModal: $('close-modal-btn') || $('close-modal'),
+    modalMatchHeader: $('modal-match-header'),
     modalBody: $('modal-body'),
     modalLineups: $('modal-lineups'),
     modalH2h: $('modal-h2h'),
-    closeModal: $('close-modal'),
-    backdrop: $('modal-backdrop'),
-
-    // Search
-    searchWrap: $('search-wrap'),
-    searchToggleBtn: $('search-toggle-btn'),
-    searchInput: $('search-input'),
-    searchClearBtn: $('search-clear-btn'),
-
-    // Theme
-    themeBtn: $('theme-btn'),
-    themeIconDark: $('theme-icon-dark'),
-    themeIconLight: $('theme-icon-light'),
-
-    // Notify
-    notifyBtn: $('notify-btn'),
-
-    // Scroll to top
+    // Misc
     scrollTopBtn: $('scroll-top-btn'),
+    // Templates
+    gameRowTpl: $('game-row-template'),
+    skelGameTpl: $('skeleton-game-template'),
+    skelTableTpl: $('skeleton-table-template'),
 };
 
-// ── State ────────────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────────
 let currentSection = 'games';
-let currentView = 'live';
+let currentFilter = 'all';         // all | live | scheduled | finished | favorites
 let currentStatsTab = 'scorers';
+let currentTheme = localStorage.getItem('fs-theme') || 'dark';
+let currentDate = todayDate();
 let pollTimer = null;
 let fetchController = null;
 let searchQuery = '';
 let searchDebounce = null;
-let favoritesOnly = false;
-let currentDate = new Date();
-currentDate.setHours(0, 0, 0, 0);
-let currentTheme = localStorage.getItem('theme') || 'dark';
-let favorites = new Set(JSON.parse(localStorage.getItem('favorites') || '[]'));
+let standingsSort = { col: 'tp', asc: false };
+let allScheduleGames = [];         // cached schedule for form+H2H
+let prevScores = {};               // gameId → {home, away} for animation
+let liveClockMap = {};             // gameId → {startTs, periodElapsed}
+let clockInterval = null;
 let watchedGames = new Set();
-let lastGameSnapshot = {};
-// Store current modal target game for H2H
+let favorites = new Set(JSON.parse(localStorage.getItem('fs-favs') || '[]'));
 let modalGame = null;
-let allScheduleGames = []; // cached schedule for form/H2H
 
-// ── Helpers ──────────────────────────────────────────────────────
+// ── Date helpers ───────────────────────────────────────────────
+function todayDate() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function isSameDay(a, b) { return a.toDateString() === b.toDateString(); }
+
+function isToday(d) { return isSameDay(d, todayDate()); }
+
+function dateLabel(d) {
+    const t = todayDate();
+    const yest = new Date(t); yest.setDate(t.getDate() - 1);
+    const tom = new Date(t); tom.setDate(t.getDate() + 1);
+    if (isSameDay(d, t)) return 'TODAY';
+    if (isSameDay(d, yest)) return 'YEST';
+    if (isSameDay(d, tom)) return 'TMR';
+    return d.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase();
+}
+
+function dateToYMD(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ── Date strip ─────────────────────────────────────────────────
+function buildDateStrip() {
+    UI.dateStrip.innerHTML = '';
+    for (let offset = -3; offset <= 3; offset++) {
+        const d = new Date(todayDate());
+        d.setDate(d.getDate() + offset);
+        const btn = document.createElement('button');
+        btn.className = `ds-btn${isSameDay(d, currentDate) ? ' active' : ''}`;
+        btn.innerHTML = `<span class="ds-day">${dateLabel(d)}</span><span class="ds-num">${d.getDate()}</span>`;
+        const dateCopy = new Date(d);
+        btn.addEventListener('click', () => {
+            currentDate = dateCopy;
+            buildDateStrip();
+            fetchData();
+        });
+        UI.dateStrip.appendChild(btn);
+    }
+}
+
+// ── Sidebar ────────────────────────────────────────────────────
+function buildSidebar() {
+    const leagues = [
+        { id: '18263', name: 'SHL', tier: 1 },
+        { id: '18266', name: 'HockeyAllsvenskan', tier: 1 },
+        { id: '18264', name: 'Hockeyettan', tier: 2 },
+        { id: '20368', name: 'Tvåan Öst', tier: 3 },
+        { id: '20221', name: 'Tvåan Norr', tier: 3 },
+        { id: '19861', name: 'Trean Öst', tier: 4 },
+        { id: '19918', name: 'Trean Syd', tier: 4 },
+        { id: '20351', name: 'Trean Väst', tier: 4 },
+        { id: '18570', name: 'Trean Norr', tier: 4 },
+        { id: '20059', name: 'Fyran Stockholm', tier: 5 },
+    ];
+    UI.sidebarLeagues.innerHTML = leagues.map(l => `
+        <button class="sb-league-btn${UI.leagueSelect.value === l.id ? ' active' : ''}" data-id="${l.id}">
+            <span class="sb-flag">🇸🇪</span>
+            <span class="sb-league-name">${l.name}</span>
+            <span class="sb-tier">Tier ${l.tier}</span>
+        </button>`).join('');
+    UI.sidebarLeagues.querySelectorAll('.sb-league-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            UI.leagueSelect.value = btn.dataset.id;
+            closeSidebar();
+            fetchData();
+            buildSidebar();
+        });
+    });
+}
+
+function openSidebar() {
+    UI.sidebar.classList.remove('hidden');
+    UI.sidebarOverlay.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+    UI.sidebar.classList.add('hidden');
+    UI.sidebarOverlay.classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+UI.sidebarToggle.addEventListener('click', () =>
+    UI.sidebar.classList.contains('hidden') ? openSidebar() : closeSidebar());
+UI.sidebarOverlay.addEventListener('click', closeSidebar);
+
+// ── Helpers ────────────────────────────────────────────────────
 const decodeHTML = html => {
     const t = document.createElement('textarea');
     t.innerHTML = html;
     return t.value;
 };
-
 const proxy = url => CONFIG.CORS_PROXY + encodeURIComponent(url);
-
-const saveFavorites = () => localStorage.setItem('favorites', JSON.stringify([...favorites]));
-
-const isSameDay = (a, b) => a.toDateString() === b.toDateString();
-
-const today = () => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
+const saveFavs = () => localStorage.setItem('fs-favs', JSON.stringify([...favorites]));
+const getLeagueName = id => UI.leagueSelect.querySelector(`option[value="${id}"]`)?.textContent || 'League';
+const isLiveStatus = s => {
+    const lo = s.toLowerCase();
+    return lo.includes('period') || lo === 'live' || lo.includes('ot') || lo.includes('gws');
 };
 
-function formatDateDisplay(date) {
-    const t = today();
-    const yesterday = new Date(t); yesterday.setDate(t.getDate() - 1);
-    const tomorrow = new Date(t); tomorrow.setDate(t.getDate() + 1);
-    if (isSameDay(date, t)) return 'Today';
-    if (isSameDay(date, yesterday)) return 'Yesterday';
-    if (isSameDay(date, tomorrow)) return 'Tomorrow';
-    return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-// Build YYYY-MM-DD string for URL usage
-function dateToParam(date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-}
-
-// ── Parser ───────────────────────────────────────────────────────
+// ── Parser ─────────────────────────────────────────────────────
 class Parser {
-
     static parseLive(html) {
         const games = [];
         try {
-            const decoded = decodeHTML(html);
-            const blocks = decoded.split('TodaysGamesGame');
+            const dec = decodeHTML(html);
+            const blocks = dec.split('TodaysGamesGame');
             const seen = new Set();
             for (let i = 1; i < blocks.length; i++) {
                 const b = blocks[i];
                 const teams = [...b.matchAll(/class="h2[^>]*>([^<]+)/g)];
                 if (teams.length < 2) continue;
-                const home = teams[0][1].trim();
-                const away = teams[1][1].trim();
+                const home = teams[0][1].trim(), away = teams[1][1].trim();
                 let raw = 'Scheduled';
                 const rm = b.match(/class=[^>]*Result[^>]*>([\s\S]*?)<\/div>/);
                 if (rm) raw = rm[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -167,7 +216,7 @@ class Parser {
                 const key = `${home}|${away}|${id}`;
                 if (seen.has(key)) continue;
                 seen.add(key);
-                games.push(Parser._processGame(home, away, raw, id));
+                games.push(Parser._proc(home, away, raw, id));
             }
         } catch (e) { console.error('parseLive', e); }
         return games;
@@ -176,8 +225,8 @@ class Parser {
     static parseSchedule(html) {
         const games = [];
         try {
-            const decoded = decodeHTML(html);
-            const rows = decoded.split('<tr');
+            const dec = decodeHTML(html);
+            const rows = dec.split('<tr');
             for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row.includes('tdNormal') && !row.includes('tdOdd')) continue;
@@ -197,7 +246,7 @@ class Parser {
                         raw = text;
                     }
                 }
-                if (home && away) games.push(Parser._processGame(home, away, raw, id));
+                if (home && away) games.push(Parser._proc(home, away, raw, id));
             }
         } catch (e) { console.error('parseSchedule', e); }
         return games;
@@ -206,8 +255,8 @@ class Parser {
     static parseStandings(html) {
         const rows = [];
         try {
-            const decoded = decodeHTML(html);
-            const parts = decoded.split('<tr');
+            const dec = decodeHTML(html);
+            const parts = dec.split('<tr');
             for (let i = 1; i < parts.length; i++) {
                 const row = parts[i];
                 if (!row.includes('tdNormal') && !row.includes('tdOdd')) continue;
@@ -225,17 +274,17 @@ class Parser {
     static parseStats(html) {
         const rows = [];
         try {
-            const decoded = decodeHTML(html);
-            const parts = decoded.split('<tr');
+            const dec = decodeHTML(html);
+            const parts = dec.split('<tr');
             for (let i = 1; i < parts.length; i++) {
                 const row = parts[i];
                 if (!row.includes('tdNormal') && !row.includes('tdOdd')) continue;
                 const cells = row.split('<td');
                 if (cells.length < 10) continue;
                 const t = k => cells[k]?.substring(cells[k].indexOf('>') + 1).replace(/<[^>]+>/g, '').trim() || '';
-                const rank = t(1), name = t(3), team = t(4);
+                const name = t(3), team = t(4);
                 if (!name || name === 'Player' || name === 'Name') continue;
-                rows.push({ rank, name, team, gp: t(6), g: t(7), a: t(8), tp: t(9) });
+                rows.push({ rank: t(1), name, team, gp: t(6), g: t(7), a: t(8), tp: t(9) });
             }
         } catch (e) { console.error('parseStats', e); }
         return rows;
@@ -244,17 +293,17 @@ class Parser {
     static parseGoalieStats(html) {
         const rows = [];
         try {
-            const decoded = decodeHTML(html);
-            const parts = decoded.split('<tr');
+            const dec = decodeHTML(html);
+            const parts = dec.split('<tr');
             for (let i = 1; i < parts.length; i++) {
                 const row = parts[i];
                 if (!row.includes('tdNormal') && !row.includes('tdOdd')) continue;
                 const cells = row.split('<td');
                 if (cells.length < 14) continue;
                 const t = k => cells[k]?.substring(cells[k].indexOf('>') + 1).replace(/<[^>]+>/g, '').trim() || '';
-                const rank = t(1), name = t(3), team = t(4);
+                const name = t(3), team = t(4);
                 if (!name || name === 'Player' || name === 'Name') continue;
-                rows.push({ rank, name, team, gp: t(6), sog: t(9), ga: t(10), gaa: t(11), svs: t(12), svsp: t(13) });
+                rows.push({ rank: t(1), name, team, gp: t(6), sog: t(9), ga: t(10), gaa: t(11), svs: t(12), svsp: t(13) });
             }
         } catch (e) { console.error('parseGoalieStats', e); }
         return rows;
@@ -263,18 +312,16 @@ class Parser {
     static parseEvents(html) {
         const d = { periods: [], venue: '', spectators: '', shots: null, periodScores: '', totalScore: '' };
         try {
-            const decoded = decodeHTML(html);
-            const vm = decoded.match(/<b>([^<]+)<\/h3>/);
+            const dec = decodeHTML(html);
+            const vm = dec.match(/<b>([^<]+)<\/h3>/);
             if (vm) d.venue = vm[1].trim();
-            const sm = decoded.match(/Spectators:\s*(\d[\d,]*)/);
+            const sm = dec.match(/Spectators:\s*(\d[\d,]*)/);
             if (sm) d.spectators = sm[1];
-            const tsm = decoded.match(/(\d+\s*-\s*\d+)[\s\S]{0,30}\(([\d\s\-,]+)\)\s*<\/div>/);
+            const tsm = dec.match(/(\d+\s*-\s*\d+)[\s\S]{0,30}\(([\d\s\-,]+)\)\s*<\/div>/);
             if (tsm) { d.totalScore = tsm[1].replace(/\s/g, ''); d.periodScores = tsm[2].trim(); }
-
-            const shotRows = [...decoded.matchAll(/>Shots<\/td>[\s\S]*?<strong>(\d+)<\/strong>[\s\S]*?\(([^)]+)\)/g)];
+            const shotRows = [...dec.matchAll(/>Shots<\/td>[\s\S]*?<strong>(\d+)<\/strong>[\s\S]*?\(([^)]+)\)/g)];
             if (shotRows.length >= 2) d.shots = { home: { total: shotRows[0][1], periods: shotRows[0][2] }, away: { total: shotRows[1][1], periods: shotRows[1][2] } };
-
-            const blocks = decoded.split(/<h3>(\d+.. period|Overtime|Game Winning Shot)<\/h3>/i);
+            const blocks = dec.split(/<h3>(\d+.. period|Overtime|Game Winning Shot)<\/h3>/i);
             for (let i = 1; i < blocks.length; i += 2) {
                 const title = blocks[i];
                 const content = blocks[i + 1].split('</table>')[0];
@@ -290,15 +337,15 @@ class Parser {
                         let raw4 = cells[4]?.substring(cells[4].indexOf('>') + 1) || '';
                         let desc = raw4.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
                         const assists = [];
-                        for (const m of raw4.matchAll(/title=["'][^"']*Assists[^"']*["']>([^<]+)/g)) { const n = m[1].trim(); if (n && !assists.includes(n)) assists.push(n); }
+                        for (const m of raw4.matchAll(/title=["'][^"']*Assists[^"']*["']>([^<]+)/g)) {
+                            const n = m[1].trim(); if (n && !assists.includes(n)) assists.push(n);
+                        }
                         if (assists.length) desc += ` (${assists.join(', ')})`;
                         events.push({ type: 'goal', time, score, desc });
                     } else {
                         const dur = t(2);
                         if (dur.includes('min')) {
-                            const team = t(3);
-                            const desc = cells[4]?.substring(cells[4].indexOf('>') + 1).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || '';
-                            events.push({ type: 'penalty', time, duration: dur, team, desc });
+                            events.push({ type: 'penalty', time, duration: dur, team: t(3), desc: cells[4]?.substring(cells[4].indexOf('>') + 1).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || '' });
                         }
                     }
                 });
@@ -311,26 +358,23 @@ class Parser {
     static parseLineups(html) {
         const info = { referees: [], linesmen: [], teams: [] };
         try {
-            const decoded = decodeHTML(html);
-            const refMatch = decoded.match(/<strong>Referee\(s\)<\/strong><\/td>[^>]*>([^<]+)<\/td>/);
-            if (refMatch) info.referees = refMatch[1].split(',').map(s => s.trim());
-            const linMatch = decoded.match(/<strong>Linesmen<\/strong><\/td>[^>]*>([^<]+)<\/td>/);
-            if (linMatch) info.linesmen = linMatch[1].split(',').map(s => s.trim());
-
-            const teamBlocks = decoded.split(/class="tdSubTitle"[^>]*><h3>/i).slice(1);
-            teamBlocks.forEach(block => {
+            const dec = decodeHTML(html);
+            const refM = dec.match(/<strong>Referee\(s\)<\/strong><\/td>[^>]*>([^<]+)<\/td>/);
+            if (refM) info.referees = refM[1].split(',').map(s => s.trim());
+            const linM = dec.match(/<strong>Linesmen<\/strong><\/td>[^>]*>([^<]+)<\/td>/);
+            if (linM) info.linesmen = linM[1].split(',').map(s => s.trim());
+            dec.split(/class="tdSubTitle"[^>]*><h3>/i).slice(1).forEach(block => {
                 const teamName = block.split('</h3>')[0].trim();
                 const lineup = { name: teamName, coach: '', roster: [] };
-                const coachMatch = block.match(/<strong>Head Coach:\s*<\/strong>\s*([^<]+)<\/td>/i);
-                if (coachMatch) lineup.coach = coachMatch[1].replace(/&nbsp;/g, '').trim();
+                const cm = block.match(/<strong>Head Coach:\s*<\/strong>\s*([^<]+)<\/td>/i);
+                if (cm) lineup.coach = cm[1].replace(/&nbsp;/g, '').trim();
                 const lines = block.split(/<th[^>]*><strong>(Goalies|1st Line|2nd Line|3rd Line|4th Line|Extra Players)<\/strong><\/th>/i);
                 for (let i = 1; i < lines.length; i += 2) {
-                    const lineName = lines[i];
+                    const lname = lines[i];
                     const content = lines[i + 1].split('</table>')[0];
-                    const players = [...content.matchAll(/<div class="lineUpPlayer[^>]*>(\d+)\.\s*([^<]+)<\/div>/g)].map(m => ({
-                        num: m[1], name: m[2].trim(), line: lineName
-                    }));
-                    lineup.roster.push(...players);
+                    [...content.matchAll(/<div class="lineUpPlayer[^>]*>(\d+)\.\s*([^<]+)<\/div>/g)].forEach(m => {
+                        lineup.roster.push({ num: m[1], name: m[2].trim(), line: lname });
+                    });
                 }
                 info.teams.push(lineup);
             });
@@ -338,29 +382,21 @@ class Parser {
         return info;
     }
 
-    // Build form map from schedule games {teamName: ['w','l','d', ...] last 5}
     static buildFormMap(games) {
         const map = {};
-        const finished = games.filter(g => g.status === 'Final');
-        // Walk chronologically (oldest first = natural order), compute results
-        for (const g of finished) {
-            const h = parseInt(g.home.score) || 0;
-            const a = parseInt(g.away.score) || 0;
-            let hRes, aRes;
-            if (h > a) { hRes = 'w'; aRes = 'l'; }
-            else if (a > h) { hRes = 'l'; aRes = 'w'; }
-            else { hRes = 'd'; aRes = 'd'; }
-            if (!map[g.home.name]) map[g.home.name] = [];
-            if (!map[g.away.name]) map[g.away.name] = [];
-            map[g.home.name].push(hRes);
-            map[g.away.name].push(aRes);
-        }
-        // Keep last 5
-        for (const k in map) map[k] = map[k].slice(-5);
+        games.filter(g => g.status === 'Final').forEach(g => {
+            const h = parseInt(g.home.score) || 0, a = parseInt(g.away.score) || 0;
+            let hr = h > a ? 'w' : a > h ? 'l' : 'd';
+            let ar = a > h ? 'w' : h > a ? 'l' : 'd';
+            [g.home.name, g.away.name].forEach((team, idx) => {
+                if (!map[team]) map[team] = [];
+                map[team].push(idx === 0 ? hr : ar);
+            });
+        });
+        Object.keys(map).forEach(k => { map[k] = map[k].slice(-5); });
         return map;
     }
 
-    // Extract H2H results between two teams from all schedule games
     static extractH2H(homeTeam, awayTeam, games) {
         return games.filter(g =>
             (g.home.name === homeTeam && g.away.name === awayTeam) ||
@@ -368,14 +404,14 @@ class Parser {
         ).slice(-10);
     }
 
-    static _processGame(home, away, raw, id) {
+    static _proc(home, away, raw, id) {
         raw = raw.trim();
-        let homeScore = '0', awayScore = '0', status = 'Upcoming', time = raw;
+        let homeScore = '–', awayScore = '–', status = 'Upcoming', time = raw;
         const sm = raw.match(/(\d+)\s*[-–]\s*(\d+)/);
         if (sm) {
             homeScore = sm[1]; awayScore = sm[2];
             const lo = raw.toLowerCase();
-            if (lo.includes('period') || lo.includes('ot') || lo.includes('str') || lo.includes('live')) {
+            if (isLiveStatus(lo)) {
                 const pm = raw.match(/(Period \d+|Overtime|GWS|OT|Str)/i);
                 status = pm ? pm[0] : 'LIVE'; time = 'LIVE';
             } else { status = 'Final'; time = 'FT'; }
@@ -387,20 +423,72 @@ class Parser {
     }
 }
 
-// ── Fetch ────────────────────────────────────────────────────────
+// ── Live Clock ─────────────────────────────────────────────────
+function startLiveClocks(games) {
+    clearInterval(clockInterval);
+    clockInterval = null;
+    const live = games.filter(g => isLiveStatus(g.status));
+    if (!live.length) return;
+
+    // Initialize clocks for newly live games
+    live.forEach(g => {
+        if (!liveClockMap[g.id]) {
+            liveClockMap[g.id] = { startTs: Date.now(), period: g.status };
+        }
+    });
+    // Remove stale
+    const liveIds = new Set(live.map(g => g.id));
+    Object.keys(liveClockMap).forEach(k => { if (!liveIds.has(k)) delete liveClockMap[k]; });
+
+    clockInterval = setInterval(() => {
+        Object.entries(liveClockMap).forEach(([id, clk]) => {
+            const el = document.querySelector(`[data-game-id="${id}"] .gr-clock`);
+            if (!el) return;
+            const elapsed = Math.floor((Date.now() - clk.startTs) / 1000);
+            const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+            const s = String(elapsed % 60).padStart(2, '0');
+            el.textContent = `${m}:${s}`;
+        });
+    }, 1000);
+}
+
+// ── Score animation ────────────────────────────────────────────
+function detectScoreChanges(games) {
+    games.forEach(g => {
+        const prev = prevScores[g.id];
+        if (prev && (prev.home !== g.home.score || prev.away !== g.away.score)) {
+            const row = document.querySelector(`[data-game-id="${g.id}"]`);
+            if (row) {
+                row.classList.add('score-flash');
+                setTimeout(() => row.classList.remove('score-flash'), 2500);
+            }
+            // Notification
+            if (watchedGames.has(g.realId) && Notification.permission === 'granted') {
+                new Notification('🏒 Goal!', { body: `${g.home.name} ${g.home.score} – ${g.away.score} ${g.away.name}` });
+            }
+        }
+        prevScores[g.id] = { home: g.home.score, away: g.away.score };
+    });
+}
+
+// ── Fetch ──────────────────────────────────────────────────────
 async function fetchData() {
     clearTimeout(pollTimer);
     if (fetchController) fetchController.abort();
     fetchController = new AbortController();
+    setLoadingState(true);
 
-    setLoading(true);
     const lid = UI.leagueSelect.value;
+    const lname = getLeagueName(lid);
+    if (UI.bcLeague) UI.bcLeague.textContent = lname;
+    if (UI.bcStatsLeague) UI.bcStatsLeague.textContent = lname;
+    buildSidebar();
+
     let url = '';
-    if (currentSection === 'games') url = `${currentView === 'live' ? CONFIG.LIVE_URL : CONFIG.SCHEDULE_URL}${lid}`;
-    if (currentSection === 'standings') url = `${CONFIG.STANDINGS_URL}${lid}`;
-    if (currentSection === 'stats') {
-        url = (currentStatsTab === 'scorers' ? CONFIG.STATS_URL : CONFIG.GOALIE_STATS_URL) + lid;
-    }
+    const todayFlag = isToday(currentDate);
+    if (currentSection === 'games') url = todayFlag ? CONFIG.LIVE_URL + lid : CONFIG.SCHEDULE_URL + lid;
+    if (currentSection === 'standings') url = CONFIG.STANDINGS_URL + lid;
+    if (currentSection === 'stats') url = (currentStatsTab === 'scorers' ? CONFIG.STATS_URL : CONFIG.GOALIE_STATS_URL) + lid;
 
     try {
         const res = await fetch(proxy(url), { signal: fetchController.signal });
@@ -408,47 +496,36 @@ async function fetchData() {
         const html = await res.text();
 
         if (currentSection === 'games') {
-            let games;
-            if (currentView === 'live') {
-                games = Parser.parseLive(html);
-                const liveCount = games.filter(g => g.status.toLowerCase().includes('period') || g.status.toLowerCase() === 'live').length;
-                updateLiveBadge(liveCount);
-                checkNotifications(games);
-            } else {
-                games = Parser.parseSchedule(html);
-                allScheduleGames = games; // cache for form/H2H
-            }
-            renderGames(applySearchFilter(games));
+            const games = todayFlag ? Parser.parseLive(html) : Parser.parseSchedule(html);
+            if (!todayFlag) allScheduleGames = games;
+            detectScoreChanges(games);
+            startLiveClocks(games);
+            const liveCount = games.filter(g => isLiveStatus(g.status)).length;
+            updateLiveBadge(liveCount);
+            renderGames(games);
         } else if (currentSection === 'standings') {
             const rows = Parser.parseStandings(html);
-            // Fetch schedule to compute real form
+            // Kick-off form fetch in background
             fetchFormData(lid).then(formMap => renderStandings(rows, formMap));
-            renderStandings(rows, {}); // initial render with no form while fetching
-            return; // early return — renderStandings called again once form ready
+            renderStandings(rows, {});
+            return;
         } else if (currentSection === 'stats') {
-            if (currentStatsTab === 'scorers') {
-                renderStats(applySearchFilter(Parser.parseStats(html)));
-            } else {
-                renderGoalieStats(applySearchFilter(Parser.parseGoalieStats(html)));
-            }
+            currentStatsTab === 'scorers' ? renderStats(Parser.parseStats(html)) : renderGoalieStats(Parser.parseGoalieStats(html));
         }
-        setLoading(false, true);
-        UI.errorContainer.classList.add('hidden');
 
+        setLoadingState(false, true);
+        UI.errorContainer.classList.add('hidden');
         const now = new Date();
-        UI.lastUpdatedTime.textContent = `• Updated ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        UI.lastUpdatedTime.textContent = `Updated ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     } catch (err) {
         if (err.name === 'AbortError') return;
         console.error('fetchData', err);
-        setLoading(false, false);
+        setLoadingState(false, false);
         UI.errorContainer.classList.remove('hidden');
     } finally {
         fetchController = null;
     }
-
-    if (currentSection === 'games' && currentView === 'live') {
-        pollTimer = setTimeout(fetchData, CONFIG.POLL_INTERVAL);
-    }
+    if (currentSection === 'games') pollTimer = setTimeout(fetchData, CONFIG.POLL_INTERVAL);
 }
 
 async function fetchFormData(lid) {
@@ -456,258 +533,248 @@ async function fetchFormData(lid) {
         const res = await fetch(proxy(CONFIG.SCHEDULE_URL + lid));
         if (!res.ok) return {};
         const html = await res.text();
-        const games = Parser.parseSchedule(html);
-        allScheduleGames = games;
-        return Parser.buildFormMap(games);
+        allScheduleGames = Parser.parseSchedule(html);
+        return Parser.buildFormMap(allScheduleGames);
     } catch { return {}; }
 }
 
 async function fetchMatchDetails(game) {
     modalGame = game;
-    UI.modalBody.innerHTML = '<div class="empty-state">Loading…</div>';
-    UI.modalH2h.innerHTML = '';
     UI.modal.classList.remove('hidden');
+    UI.modalMatchHeader.innerHTML = `<div class="mh-teams"><span>${game.home.name}</span><span class="mh-score">${game.home.score} – ${game.away.score}</span><span>${game.away.name}</span></div>`;
+    UI.modalBody.innerHTML = '<div class="empty-state">Loading…</div>';
     switchModalSection('summary');
     try {
-        const [eventsRes, lineupsRes] = await Promise.all([
+        const [evRes, luRes] = await Promise.all([
             fetch(proxy(CONFIG.EVENTS_URL + game.realId)),
             fetch(proxy(CONFIG.LINEUPS_URL + game.realId))
         ]);
-        const eventsHtml = await eventsRes.text();
-        const lineupsHtml = await lineupsRes.text();
-        const details = Parser.parseEvents(eventsHtml);
-        const lineups = Parser.parseLineups(lineupsHtml);
+        const details = Parser.parseEvents(await evRes.text());
+        const lineups = Parser.parseLineups(await luRes.text());
         details.matchInfo = lineups;
-        renderDetails(details);
-    } catch (e) {
-        UI.modalBody.innerHTML = '<div class="empty-state" style="color:var(--red)">Failed to load stats.</div>';
+        renderDetails(details, game);
+    } catch {
+        UI.modalBody.innerHTML = '<div class="empty-state" style="color:var(--red)">Failed to load.</div>';
     }
 }
 
-// ── Notification logic ────────────────────────────────────────────
-function checkNotifications(games) {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    for (const g of games) {
-        if (!watchedGames.has(g.realId)) continue;
-        const prev = lastGameSnapshot[g.realId];
-        const isLive = g.status.toLowerCase().includes('period') || g.status.toLowerCase() === 'live';
-        if (!prev) {
-            lastGameSnapshot[g.realId] = { ...g };
-            continue;
-        }
-        // Notify on score change
-        const scoreChanged = prev.home.score !== g.home.score || prev.away.score !== g.away.score;
-        if (scoreChanged && isLive) {
-            new Notification('⚽ Goal!', {
-                body: `${g.home.name} ${g.home.score} - ${g.away.score} ${g.away.name}`,
-                icon: '🏒'
-            });
-        }
-        // Notify when match goes live
-        if (!prev.status.toLowerCase().includes('period') && !prev.status.toLowerCase().includes('live') && isLive) {
-            new Notification('🏒 Game Started!', {
-                body: `${g.home.name} vs ${g.away.name} is now live!`,
-            });
-        }
-        lastGameSnapshot[g.realId] = { ...g };
+// ── Filter helpers ─────────────────────────────────────────────
+function applyStatusFilter(games) {
+    switch (currentFilter) {
+        case 'live': return games.filter(g => isLiveStatus(g.status));
+        case 'scheduled': return games.filter(g => g.status === 'Upcoming');
+        case 'finished': return games.filter(g => g.status === 'Final');
+        case 'favorites': return games.filter(g => favorites.has(g.home.name) || favorites.has(g.away.name));
+        default: return games;
     }
 }
 
-// ── Search / filter helpers ────────────────────────────────────────
-function applySearchFilter(items) {
+function applySearch(items) {
     if (!searchQuery) return items;
     const q = searchQuery.toLowerCase();
     return items.filter(item => {
         if (item.home) return item.home.name.toLowerCase().includes(q) || item.away.name.toLowerCase().includes(q);
-        if (item.team) return item.team.toLowerCase().includes(q) || (item.name || '').toLowerCase().includes(q);
-        if (item.name) return item.name.toLowerCase().includes(q) || item.team.toLowerCase().includes(q);
+        if (item.name) return item.name.toLowerCase().includes(q) || (item.team || '').toLowerCase().includes(q);
+        if (item.team) return item.team.toLowerCase().includes(q);
         return false;
     });
 }
 
-// ── Render ───────────────────────────────────────────────────────
-function renderGames(games) {
-    UI.gamesContainer.innerHTML = '';
-    let displayGames = games;
-
-    if (favoritesOnly) {
-        displayGames = games.filter(g => favorites.has(g.home.name) || favorites.has(g.away.name));
+function updateLiveBadge(count) {
+    UI.liveBadge.textContent = count;
+    UI.liveBadge.classList.toggle('hidden', count === 0);
+    // Also update nav games badge
+    let navBadge = $('nav-games-badge');
+    if (!navBadge) {
+        navBadge = document.createElement('span');
+        navBadge.id = 'nav-games-badge';
+        navBadge.className = 'nav-badge';
+        $('nav-games').appendChild(navBadge);
     }
+    navBadge.textContent = count;
+    navBadge.style.display = count > 0 ? 'flex' : 'none';
+}
 
-    if (!displayGames.length) {
-        UI.gamesContainer.innerHTML = favoritesOnly
-            ? '<div class="empty-state">No favorites found. ⭐ Star a team first!</div>'
-            : '<div class="empty-state">No games found for this league.</div>';
+// ── Render: Games ──────────────────────────────────────────────
+function renderGames(games) {
+    const filtered = applySearch(applyStatusFilter(games));
+    UI.gamesContainer.innerHTML = '';
+
+    if (!filtered.length) {
+        UI.gamesContainer.innerHTML = `<div class="empty-state">${currentFilter === 'favorites' ? 'No favorites. Tap ☆ next to a team!' : 'No games found.'}</div>`;
         return;
     }
 
+    // League header
     const banner = document.createElement('div');
     banner.className = 'league-banner';
-    banner.innerHTML = `
-        <span class="lb-flag">${getLeagueFlag(UI.leagueSelect.value)}</span>
-        <span class="lb-country">Sweden</span>
-        <span class="lb-name">${getLeagueName(UI.leagueSelect.value)}</span>
-        <span class="lb-count">${displayGames.length} game${displayGames.length !== 1 ? 's' : ''}</span>
-    `;
+    banner.innerHTML = `<span class="lb-flag">🇸🇪</span><span class="lb-country">Sweden</span><span class="lb-name">${getLeagueName(UI.leagueSelect.value)}</span><span class="lb-count">${filtered.length} game${filtered.length !== 1 ? 's' : ''}</span>`;
     UI.gamesContainer.appendChild(banner);
 
-    displayGames.forEach(g => {
-        const clone = UI.gameTemplate.content.cloneNode(true);
+    filtered.forEach(g => {
+        const clone = UI.gameRowTpl.content.cloneNode(true);
         const row = clone.querySelector('.game-row');
+        row.dataset.gameId = g.id;
 
         const lo = g.status.toLowerCase();
-        if (lo === 'final') row.classList.add('final');
-        else if (lo.includes('period') || lo === 'live') row.classList.add('live');
-        else row.classList.add('scheduled');
+        const isLive = isLiveStatus(g.status);
+        const isFinal = g.status === 'Final';
 
-        row.querySelector('.gr-time').textContent = g.time;
-        const statusEl = row.querySelector('.gr-status');
-        statusEl.textContent = g.status;
-        if (row.classList.contains('live')) statusEl.classList.add('live');
+        if (isLive) row.classList.add('is-live');
+        else if (isFinal) row.classList.add('is-final');
+        else row.classList.add('is-scheduled');
 
-        const [homeRow, awayRow] = row.querySelectorAll('.gr-team');
-        const homeNameEl = homeRow.querySelector('.gr-name');
-        const awayNameEl = awayRow.querySelector('.gr-name');
-        homeNameEl.textContent = g.home.name;
-        homeRow.querySelector('.gr-score').textContent = g.home.score;
-        awayNameEl.textContent = g.away.name;
-        awayRow.querySelector('.gr-score').textContent = g.away.score;
+        // Status column
+        const periodEl = row.querySelector('.gr-period');
+        const clockEl = row.querySelector('.gr-clock');
+        const dotEl = row.querySelector('.live-dot');
 
-        // Favourite stars
-        const [homeStar, awayStar] = row.querySelectorAll('.fav-star');
-        updateStar(homeStar, g.home.name);
-        updateStar(awayStar, g.away.name);
-        homeStar.addEventListener('click', e => { e.stopPropagation(); toggleFavorite(g.home.name, homeStar); });
-        awayStar.addEventListener('click', e => { e.stopPropagation(); toggleFavorite(g.away.name, awayStar); });
-
-        // Winner highlight
-        if (row.classList.contains('final')) {
-            const h = parseInt(g.home.score) || 0, a = parseInt(g.away.score) || 0;
-            if (h > a) homeRow.classList.add('winner');
-            else if (a > h) awayRow.classList.add('winner');
+        if (isLive) {
+            // Extract period abbreviation
+            const pm = g.status.match(/(Period \d+|Overtime|OT|GWS)/i);
+            const pLabel = pm ? pm[0].replace('Period ', '').replace('1', '1st').replace('2', '2nd').replace('3', '3rd') : 'LIVE';
+            periodEl.textContent = pLabel;
+            clockEl.textContent = '00:00';
+            dotEl.classList.remove('hidden');
+        } else if (isFinal) {
+            periodEl.textContent = 'FT';
+            clockEl.textContent = '';
+        } else {
+            periodEl.textContent = '';
+            clockEl.textContent = g.time;
         }
 
-        // Notification watch bell
-        const btn = row.querySelector('.stats-btn');
-        if (g.realId) {
-            btn.addEventListener('click', e => { e.stopPropagation(); fetchMatchDetails(g); });
-            row.addEventListener('click', () => fetchMatchDetails(g));
+        // Teams
+        const [homeRow, awayRow] = row.querySelectorAll('.gr-team');
+        homeRow.querySelector('.gr-name').textContent = g.home.name;
+        awayRow.querySelector('.gr-name').textContent = g.away.name;
 
-            // Add notification watch icon if live
-            if (lo.includes('period') || lo === 'live') {
-                const watchBtn = document.createElement('button');
-                watchBtn.className = `watch-btn ${watchedGames.has(g.realId) ? 'watching' : ''}`;
-                watchBtn.title = watchedGames.has(g.realId) ? 'Stop alerts' : 'Alert on score change';
-                watchBtn.innerHTML = '🔔';
-                watchBtn.addEventListener('click', e => {
+        const hScore = row.querySelectorAll('.gr-score')[0];
+        const aScore = row.querySelectorAll('.gr-score')[1];
+        hScore.textContent = g.home.score;
+        aScore.textContent = g.away.score;
+
+        if (isFinal) {
+            const h = parseInt(g.home.score) || 0, a = parseInt(g.away.score) || 0;
+            if (h > a) { homeRow.classList.add('winner'); hScore.classList.add('winner-score'); }
+            else if (a > h) { awayRow.classList.add('winner'); aScore.classList.add('winner-score'); }
+        }
+
+        // Fav stars
+        const [hStar, aStar] = row.querySelectorAll('.fav-star');
+        updateStar(hStar, g.home.name);
+        updateStar(aStar, g.away.name);
+        hStar.addEventListener('click', e => { e.stopPropagation(); toggleFav(g.home.name, hStar); });
+        aStar.addEventListener('click', e => { e.stopPropagation(); toggleFav(g.away.name, aStar); });
+
+        // Info button + row click
+        const infoBtn = row.querySelector('.gr-info-btn');
+        if (g.realId) {
+            infoBtn.addEventListener('click', e => { e.stopPropagation(); fetchMatchDetails(g); });
+            row.addEventListener('click', () => fetchMatchDetails(g));
+            // Watch bell for live games
+            if (isLive) {
+                const wb = document.createElement('button');
+                wb.className = `watch-btn${watchedGames.has(g.realId) ? ' watching' : ''}`;
+                wb.title = watchedGames.has(g.realId) ? 'Stop alerts' : 'Alert on goal';
+                wb.textContent = '🔔';
+                wb.addEventListener('click', e => {
                     e.stopPropagation();
-                    toggleWatchGame(g.realId, watchBtn);
+                    watchedGames.has(g.realId) ? watchedGames.delete(g.realId) : watchedGames.add(g.realId);
+                    wb.classList.toggle('watching');
                 });
-                row.querySelector('.game-row-actions').prepend(watchBtn);
+                row.querySelector('.gr-actions').prepend(wb);
             }
         } else {
-            btn.style.display = 'none';
+            infoBtn.style.display = 'none';
         }
 
         UI.gamesContainer.appendChild(clone);
     });
 }
 
-function updateStar(btn, teamName) {
-    const isFav = favorites.has(teamName);
+function updateStar(btn, name) {
+    const isFav = favorites.has(name);
     btn.textContent = isFav ? '⭐' : '☆';
-    btn.classList.toggle('fav-active', isFav);
+    btn.classList.toggle('is-fav', isFav);
 }
 
-function toggleFavorite(teamName, starBtn) {
-    if (favorites.has(teamName)) {
-        favorites.delete(teamName);
-    } else {
-        favorites.add(teamName);
-    }
-    saveFavorites();
-    updateStar(starBtn, teamName);
-    // If filtering, re-render
-    if (favoritesOnly) fetchData();
+function toggleFav(name, star) {
+    favorites.has(name) ? favorites.delete(name) : favorites.add(name);
+    saveFavs();
+    updateStar(star, name);
+    if (currentFilter === 'favorites') fetchData();
 }
 
-function toggleWatchGame(gameId, btn) {
-    if (watchedGames.has(gameId)) {
-        watchedGames.delete(gameId);
-        btn.classList.remove('watching');
-    } else {
-        watchedGames.add(gameId);
-        btn.classList.add('watching');
-    }
-}
-
-function getLeagueName(id) {
-    const opt = UI.leagueSelect.querySelector(`option[value="${id}"]`);
-    return opt ? opt.textContent : 'Leagues';
-}
-
-function getLeagueFlag(id) {
-    return '🇸🇪';
-}
-
+// ── Render: Standings ──────────────────────────────────────────
 function renderStandings(rows, formMap = {}) {
+    const filtered = applySearch(rows);
+    const sorted = sortStandings(filtered);
     UI.standingsBody.innerHTML = '';
-    if (!rows.length) { UI.standingsBody.innerHTML = '<tr><td colspan="10" class="empty-state">No data.</td></tr>'; return; }
+    if (!sorted.length) { UI.standingsBody.innerHTML = '<tr><td colspan="10" class="empty-state">No data.</td></tr>'; return; }
 
-    let filtered = rows;
-    if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        filtered = rows.filter(r => r.team.toLowerCase().includes(q));
-    }
+    const total = sorted.length;
+    // Zone thresholds (generic: top 2 = promotion, bottom 2 = relegation)
+    const proZone = 2, relZone = total - 2;
 
-    filtered.forEach((r, idx) => {
+    sorted.forEach((r, idx) => {
         const tr = document.createElement('tr');
         tr.style.cursor = 'pointer';
+        if (idx < proZone) tr.classList.add('zone-pro');
+        else if (idx >= relZone) tr.classList.add('zone-rel');
         tr.addEventListener('click', () => showTeamStats(r.team));
 
-        // Real form from schedule (or fallback empty)
         const formArr = formMap[r.team] || [];
         const forms = formArr.length
-            ? formArr.map(f => `<span class="form-dot form-${f}">${f}</span>`).join('')
-            : '<span class="form-dot form-d" style="opacity:.3">?</span>'.repeat(5);
+            ? formArr.map(f => `<span class="form-dot form-${f}">${f.toUpperCase()}</span>`).join('')
+            : '–';
 
         const isFav = favorites.has(r.team);
-        tr.innerHTML = `<td class="col-rank">${r.rank}</td>
-            <td class="text-left"><strong>${r.team}</strong></td>
+        tr.innerHTML = `
+            <td class="col-rank">${r.rank}</td>
+            <td class="text-left td-team"><strong>${r.team}</strong></td>
             <td>${r.gp}</td><td>${r.w}</td><td>${r.tie}</td><td>${r.l}</td>
             <td class="col-gd">${r.gd}</td>
             <td class="tp-cell">${r.tp}</td>
             <td><div class="form-cell">${forms}</div></td>
-            <td class="fav-cell"><button class="fav-star standings-fav" data-team="${r.team}">${isFav ? '⭐' : '☆'}</button></td>`;
+            <td><button class="fav-star standings-star" data-team="${r.team}">${isFav ? '⭐' : '☆'}</button></td>`;
         UI.standingsBody.appendChild(tr);
     });
 
-    // Wire star buttons
-    UI.standingsBody.querySelectorAll('.standings-fav').forEach(btn => {
+    // Wire standing star buttons
+    UI.standingsBody.querySelectorAll('.standings-star').forEach(btn => {
         btn.addEventListener('click', e => {
             e.stopPropagation();
-            const team = btn.dataset.team;
-            if (favorites.has(team)) { favorites.delete(team); btn.textContent = '☆'; }
-            else { favorites.add(team); btn.textContent = '⭐'; }
-            saveFavorites();
+            const t = btn.dataset.team;
+            favorites.has(t) ? favorites.delete(t) : favorites.add(t);
+            saveFavs();
+            btn.textContent = favorites.has(t) ? '⭐' : '☆';
         });
     });
 
-    setLoading(false, true);
+    setLoadingState(false, true);
     UI.errorContainer.classList.add('hidden');
     const now = new Date();
-    UI.lastUpdatedTime.textContent = `• Updated ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    UI.lastUpdatedTime.textContent = `Updated ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function sortStandings(rows) {
+    return [...rows].sort((a, b) => {
+        const col = standingsSort.col;
+        let va = col === 'team' ? a[col] : (parseFloat(a[col]) || 0);
+        let vb = col === 'team' ? b[col] : (parseFloat(b[col]) || 0);
+        if (col === 'team') {
+            return standingsSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
+        }
+        // GD can be negative
+        if (col === 'gd') { va = parseFloat(String(a.gd).replace('+', '')) || 0; vb = parseFloat(String(b.gd).replace('+', '')) || 0; }
+        return standingsSort.asc ? va - vb : vb - va;
+    });
 }
 
 async function showTeamStats(teamName) {
-    currentSection = 'stats';
-    currentStatsTab = 'scorers';
-    const sections = [UI.sectionGames, UI.sectionStandings, UI.sectionStats];
-    sections.forEach(el => el.classList.remove('active-section'));
-    UI.sectionStats.classList.add('active-section');
-    document.querySelectorAll('.nav-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.section === 'stats'));
-    UI.statsScorersBtn.classList.add('active-sub');
-    UI.statsGoaliesBtn.classList.remove('active-sub');
+    currentSection = 'stats'; currentStatsTab = 'scorers';
+    switchSection('stats');
     await fetchData();
     setTimeout(() => {
         document.querySelectorAll('#stats-body tr').forEach(row => {
@@ -719,348 +786,243 @@ async function showTeamStats(teamName) {
     }, 100);
 }
 
+// ── Render: Stats ──────────────────────────────────────────────
 function renderStats(rows) {
-    UI.statsHeader.innerHTML = `<th class="col-rank">#</th><th class="text-left">Player</th><th class="col-team-name text-left">Team</th><th title="Games Played">GP</th><th title="Goals">G</th><th title="Assists">A</th><th title="Total Points"><strong>TP</strong></th>`;
+    UI.statsHeader.innerHTML = `<th class="col-rank">#</th><th class="text-left">Player</th><th class="text-left">Team</th><th>GP</th><th>G</th><th>A</th><th><strong>PTS</strong></th>`;
+    const filtered = applySearch(rows);
     UI.statsBody.innerHTML = '';
-    if (!rows.length) { UI.statsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No data.</td></tr>'; return; }
-    rows.forEach(r => {
+    if (!filtered.length) { UI.statsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No data.</td></tr>'; return; }
+    filtered.forEach(r => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td class="col-rank">${r.rank}</td>
-            <td class="text-left"><strong>${r.name}</strong></td>
-            <td class="col-team-name text-left">${r.team}</td>
-            <td>${r.gp}</td><td>${r.g}</td><td>${r.a}</td>
-            <td class="tp-cell">${r.tp}</td>`;
+        tr.innerHTML = `<td class="col-rank">${r.rank}</td><td class="text-left"><strong>${r.name}</strong></td><td class="text-left td-team-small">${r.team}</td><td>${r.gp}</td><td>${r.g}</td><td>${r.a}</td><td class="tp-cell">${r.tp}</td>`;
         UI.statsBody.appendChild(tr);
     });
 }
 
 function renderGoalieStats(rows) {
-    UI.statsHeader.innerHTML = `<th class="col-rank">#</th><th class="text-left">Goalie</th><th class="col-team-name text-left">Team</th><th>GP</th><th>SOG</th><th>GA</th><th>GAA</th><th class="tp-cell">SVS%</th>`;
+    UI.statsHeader.innerHTML = `<th class="col-rank">#</th><th class="text-left">Goalie</th><th class="text-left">Team</th><th>GP</th><th>SOG</th><th>GA</th><th>GAA</th><th class="tp-cell">SVS%</th>`;
+    const filtered = applySearch(rows);
     UI.statsBody.innerHTML = '';
-    if (!rows.length) { UI.statsBody.innerHTML = '<tr><td colspan="8" class="empty-state">No data.</td></tr>'; return; }
-    rows.forEach(r => {
+    if (!filtered.length) { UI.statsBody.innerHTML = '<tr><td colspan="8" class="empty-state">No data.</td></tr>'; return; }
+    filtered.forEach(r => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td class="col-rank">${r.rank}</td>
-            <td class="text-left"><strong>${r.name}</strong></td>
-            <td class="col-team-name text-left">${r.team}</td>
-            <td>${r.gp}</td><td>${r.sog}</td><td>${r.ga}</td><td>${r.gaa}</td>
-            <td class="tp-cell">${r.svsp}</td>`;
+        tr.innerHTML = `<td class="col-rank">${r.rank}</td><td class="text-left"><strong>${r.name}</strong></td><td class="text-left td-team-small">${r.team}</td><td>${r.gp}</td><td>${r.sog}</td><td>${r.ga}</td><td>${r.gaa}</td><td class="tp-cell">${r.svsp}</td>`;
         UI.statsBody.appendChild(tr);
     });
 }
 
-function updateLiveBadge(count) {
-    let badge = $('nav-games-badge');
-    if (!badge) {
-        badge = document.createElement('span');
-        badge.id = 'nav-games-badge';
-        badge.className = 'nav-badge';
-        $('nav-games').appendChild(badge);
-    }
-    badge.textContent = count;
-    badge.style.display = count > 0 ? 'flex' : 'none';
-}
-
-function renderDetails(d) {
-    let html = `<div class="modal-match-header">
-        <div class="modal-venue">${d.venue || 'Unknown Venue'}</div>
-        <div class="modal-score-row">
-            <span class="modal-total-score">${d.totalScore || '—'}</span>
-            <span class="modal-period-scores">${d.periodScores ? `(${d.periodScores})` : ''}</span>
+// ── Render: Modal ──────────────────────────────────────────────
+function renderDetails(d, game) {
+    // Update header with full info
+    UI.modalMatchHeader.innerHTML = `
+        <div class="mh-venue">${d.venue || 'Unknown Venue'}</div>
+        <div class="mh-score-row">
+            <span class="mh-team">${game.home.name}</span>
+            <span class="mh-score">${d.totalScore || '–'}</span>
+            <span class="mh-team">${game.away.name}</span>
         </div>
-        <div class="modal-spectators">${d.spectators ? `👥 ${parseInt(d.spectators).toLocaleString()} spectators` : ''}</div>
-    </div>`;
+        <div class="mh-sub">${d.periodScores ? `(${d.periodScores})` : ''} ${d.spectators ? `· 👥 ${parseInt(d.spectators).toLocaleString()}` : ''}</div>`;
 
+    let html = '';
     if (d.shots) {
         const hS = parseInt(d.shots.home.total) || 0, aS = parseInt(d.shots.away.total) || 0;
         const pct = Math.round(hS / (hS + aS || 1) * 100);
-        html += `<div class="shots-box">
-            <div class="shots-label">Shots on Goal</div>
-            <div class="shots-row">
-                <span class="shots-home">${hS}</span>
-                <div class="shots-bar-track"><div class="shots-bar-fill" style="width:${pct}%"></div></div>
-                <span class="shots-away">${aS}</span>
-            </div>
-            <div class="shots-periods">${d.shots.home.periods} &nbsp;|&nbsp; ${d.shots.away.periods}</div>
-        </div>`;
+        html += `<div class="shots-box"><div class="shots-label">Shots on Goal</div>
+            <div class="shots-row"><span class="shots-num home">${hS}</span>
+            <div class="shots-track"><div class="shots-fill" style="width:${pct}%"></div></div>
+            <span class="shots-num away">${aS}</span></div>
+            <div class="shots-periods">${d.shots.home.periods} | ${d.shots.away.periods}</div></div>`;
     }
-
     if (!d.periods.length) html += '<div class="empty-state">No events recorded.</div>';
-
     [...d.periods].reverse().forEach(p => {
-        html += `<div class="period-summary">
-            <div class="period-title">${p.title}</div>
-            ${p.events.map(e => e.type === 'goal'
-            ? `<div class="event-row goal"><div class="event-marker">${e.time}</div><div class="event-main"><span class="score-chip">${e.score}</span><span class="event-desc">${e.desc}</span></div></div>`
-            : `<div class="event-row penalty"><div class="event-marker">${e.time}</div><div class="event-main"><span class="penalty-chip">${e.duration}</span><span class="event-desc">${e.team ? `[${e.team}] ` : ''}${e.desc}</span></div></div>`
-        ).join('')}
-        </div>`;
+        html += `<div class="period-block"><div class="period-title">${p.title}</div>`;
+        html += p.events.map(e => e.type === 'goal'
+            ? `<div class="ev-row goal"><span class="ev-time">${e.time}</span><span class="ev-chip goal-chip">${e.score}</span><span class="ev-desc">${e.desc}</span></div>`
+            : `<div class="ev-row penalty"><span class="ev-time">${e.time}</span><span class="ev-chip pen-chip">${e.duration}</span><span class="ev-desc">${e.team ? `[${e.team}] ` : ''}${e.desc}</span></div>`
+        ).join('');
+        html += '</div>';
     });
-
-    if (d.matchInfo && (d.matchInfo.referees.length || d.matchInfo.homeCoach)) {
-        html += `<div class="match-info-section">
-            <div class="period-title" style="margin-top: 24px;">Match Info</div>
-            <div class="info-grid">`;
-        if (d.matchInfo.referees?.length) html += `<div class="info-item"><span class="info-label">Referees</span><span class="info-val">${d.matchInfo.referees.join(', ')}</span></div>`;
-        if (d.matchInfo.linesmen?.length) html += `<div class="info-item"><span class="info-label">Linesmen</span><span class="info-val">${d.matchInfo.linesmen.join(', ')}</span></div>`;
-        if (d.matchInfo.homeCoach || d.matchInfo.awayCoach) html += `<div class="info-item"><span class="info-label">Coaches</span><span class="info-val">${d.matchInfo.homeCoach || 'N/A'} &nbsp;|&nbsp; ${d.matchInfo.awayCoach || 'N/A'}</span></div>`;
-        html += `</div></div>`;
+    if (d.matchInfo?.referees?.length) {
+        html += `<div class="match-info-section"><div class="period-title">Officials</div><div class="info-grid">
+            <div class="info-row"><span class="info-lbl">Referees</span><span>${d.matchInfo.referees.join(', ')}</span></div>
+            ${d.matchInfo.linesmen?.length ? `<div class="info-row"><span class="info-lbl">Linesmen</span><span>${d.matchInfo.linesmen.join(', ')}</span></div>` : ''}
+        </div></div>`;
     }
-
     UI.modalBody.innerHTML = html;
     renderLineups(d.matchInfo);
-
-    // Render H2H
-    if (modalGame) renderH2H(modalGame);
+    renderH2H(game);
 }
 
 function renderLineups(info) {
-    if (!info || !info.teams || !info.teams.length) {
-        UI.modalLineups.innerHTML = '<div class="empty-state">Lineup data not available for this game yet.</div>';
-        return;
-    }
+    if (!info?.teams?.length) { UI.modalLineups.innerHTML = '<div class="empty-state">Lineups not available yet.</div>'; return; }
     let html = '';
     info.teams.forEach(team => {
-        html += `<div class="lineup-team">
-            <div class="lineup-team-header">${team.name} <span class="coach-label">(Coach: ${team.coach || 'N/A'})</span></div>
-            <div class="lineup-grid">`;
-        const lines = ['Goalies', '1st Line', '2nd Line', '3rd Line', '4th Line', 'Extra Players'];
-        lines.forEach(line => {
+        html += `<div class="lineup-team"><div class="lineup-team-hdr">${team.name} <span class="coach-lbl">(${team.coach || 'N/A'})</span></div><div class="lineup-grid">`;
+        ['Goalies', '1st Line', '2nd Line', '3rd Line', '4th Line', 'Extra Players'].forEach(line => {
             const players = team.roster.filter(p => p.line === line);
             if (players.length) {
-                html += `<div class="lineup-row">
-                    <div class="line-label">${line}</div>
-                    <div class="players-list">
-                        ${players.map(p => `<span class="player-chip"><i>${p.num}</i> ${p.name}</span>`).join('')}
-                    </div>
-                </div>`;
+                html += `<div class="lineup-row"><div class="line-lbl">${line}</div><div class="players-list">${players.map(p => `<span class="player-chip"><i>${p.num}</i> ${p.name}</span>`).join('')}</div></div>`;
             }
         });
-        html += `</div></div>`;
+        html += '</div></div>';
     });
     UI.modalLineups.innerHTML = html;
 }
 
 function renderH2H(game) {
-    const h2hGames = Parser.extractH2H(game.home.name, game.away.name, allScheduleGames);
-    if (!h2hGames.length) {
-        UI.modalH2h.innerHTML = `<div class="empty-state">No recent H2H data available.<br><small>Load "Past Results" first to populate this.</small></div>`;
-        return;
+    const h2h = Parser.extractH2H(game.home.name, game.away.name, allScheduleGames);
+    if (!h2h.length) { UI.modalH2h.innerHTML = '<div class="empty-state">No H2H data — load Past Results first.</div>'; return; }
+    let html = `<div class="h2h-hdr"><span>${game.home.name}</span><span class="h2h-vs">H2H</span><span>${game.away.name}</span></div><div class="h2h-list">`;
+    [...h2h].reverse().forEach(g => {
+        const h = parseInt(g.home.score) || 0, a = parseInt(g.away.score) || 0;
+        const who = h > a ? 'home' : a > h ? 'away' : 'draw';
+        html += `<div class="h2h-row"><span class="h2h-team ${who === 'home' ? 'h2h-win' : ''}">${g.home.name}</span><span class="h2h-score">${g.home.score} – ${g.away.score}</span><span class="h2h-team ${who === 'away' ? 'h2h-win' : ''} text-right">${g.away.name}</span></div>`;
+    });
+    UI.modalH2h.innerHTML = html + '</div>';
+}
+
+function switchModalSection(sec) {
+    UI.modalBody.classList.toggle('hidden', sec !== 'summary');
+    UI.modalLineups.classList.toggle('hidden', sec !== 'lineups');
+    UI.modalH2h.classList.toggle('hidden', sec !== 'h2h');
+    document.querySelectorAll('.modal-tab').forEach(b => b.classList.toggle('active', b.dataset.modalSection === sec));
+}
+
+// ── Loading state ──────────────────────────────────────────────
+function setLoadingState(on, success = false) {
+    UI.statusText.textContent = on ? 'Loading…' : success ? 'Live' : 'Error';
+    UI.statusPill.className = `status-chip${success ? ' connected' : on ? '' : ' error'}`;
+    UI.refreshBtn.classList.toggle('spinning', on);
+    if (success && currentSection === 'games') UI.statusPill.classList.add('live-pulse');
+    else UI.statusPill.classList.remove('live-pulse');
+
+    if (!on) return;
+    if (currentSection === 'games') {
+        UI.gamesContainer.innerHTML = '';
+        for (let i = 0; i < 6; i++) UI.gamesContainer.appendChild(UI.skelGameTpl.content.cloneNode(true));
+    } else if (currentSection === 'standings') {
+        UI.standingsBody.innerHTML = '';
+        for (let i = 0; i < 14; i++) UI.standingsBody.appendChild(UI.skelTableTpl.content.cloneNode(true));
+    } else {
+        UI.statsBody.innerHTML = '';
+        for (let i = 0; i < 10; i++) UI.statsBody.appendChild(UI.skelTableTpl.content.cloneNode(true));
     }
-    let html = `<div class="h2h-header">
-        <span class="h2h-team-name">${game.home.name}</span>
-        <span class="h2h-vs">vs</span>
-        <span class="h2h-team-name">${game.away.name}</span>
-    </div>
-    <div class="h2h-list">`;
-    [...h2hGames].reverse().forEach(g => {
-        const winner = parseInt(g.home.score) > parseInt(g.away.score) ? 'home' : parseInt(g.away.score) > parseInt(g.home.score) ? 'away' : 'draw';
-        html += `<div class="h2h-row">
-            <span class="h2h-result-team ${winner === 'home' ? 'h2h-winner' : ''}">${g.home.name}</span>
-            <span class="h2h-score">${g.home.score} - ${g.away.score}</span>
-            <span class="h2h-result-team ${winner === 'away' ? 'h2h-winner' : ''}">${g.away.name}</span>
-        </div>`;
-    });
-    html += '</div>';
-    UI.modalH2h.innerHTML = html;
 }
 
-function switchModalSection(section) {
-    UI.modalBody.classList.toggle('hidden', section !== 'summary');
-    UI.modalLineups.classList.toggle('hidden', section !== 'lineups');
-    UI.modalH2h.classList.toggle('hidden', section !== 'h2h');
-    document.querySelectorAll('.modal-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.modalSection === section);
-    });
-}
-
-function switchStatsTab(tab) {
-    currentStatsTab = tab;
-    UI.statsScorersBtn.classList.toggle('active-sub', tab === 'scorers');
-    UI.statsGoaliesBtn.classList.toggle('active-sub', tab === 'goalies');
-    fetchData();
-}
-
-// ── Navigation ───────────────────────────────────────────────────
+// ── Section switching ──────────────────────────────────────────
 function switchSection(section) {
     currentSection = section;
     [UI.sectionGames, UI.sectionStandings, UI.sectionStats].forEach(el => el.classList.remove('active-section'));
     const map = { games: UI.sectionGames, standings: UI.sectionStandings, stats: UI.sectionStats };
     map[section].classList.add('active-section');
-    document.querySelectorAll('.nav-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.section === section);
-    });
-    // Show/hide date nav
-    UI.dateNav.style.display = section === 'games' ? 'flex' : 'none';
-    fetchData();
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.toggle('active', b.dataset.section === section));
+    document.querySelectorAll('.mbn-btn[data-section]').forEach(b => b.classList.toggle('active', b.dataset.section === section));
+    if (section !== 'games') clearInterval(clockInterval);
 }
 
-// ── Date navigator ───────────────────────────────────────────────
-function updateDateDisplay() {
-    UI.dateDisplay.textContent = formatDateDisplay(currentDate);
-    const isToday = isSameDay(currentDate, today());
-    UI.dateTodayBtn.classList.toggle('date-label-btn--today', isToday);
-}
-
-UI.datePrevBtn.addEventListener('click', () => {
-    currentDate.setDate(currentDate.getDate() - 1);
-    updateDateDisplay();
-    fetchData();
-});
-
-UI.dateNextBtn.addEventListener('click', () => {
-    currentDate.setDate(currentDate.getDate() + 1);
-    updateDateDisplay();
-    fetchData();
-});
-
-UI.dateTodayBtn.addEventListener('click', () => {
-    currentDate = today();
-    updateDateDisplay();
-    fetchData();
-});
-
-// ── Search ───────────────────────────────────────────────────────
-UI.searchToggleBtn.addEventListener('click', () => {
-    UI.searchWrap.classList.toggle('search-open');
-    if (UI.searchWrap.classList.contains('search-open')) {
-        UI.searchInput.focus();
-    } else {
-        UI.searchInput.value = '';
-        searchQuery = '';
-        UI.searchClearBtn.classList.add('hidden');
-        fetchData();
-    }
-});
-
-UI.searchInput.addEventListener('input', () => {
-    const val = UI.searchInput.value.trim();
-    UI.searchClearBtn.classList.toggle('hidden', !val);
-    clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => {
-        searchQuery = val;
-        fetchData();
-    }, 250);
-});
-
-UI.searchClearBtn.addEventListener('click', () => {
-    UI.searchInput.value = '';
-    searchQuery = '';
-    UI.searchClearBtn.classList.add('hidden');
-    UI.searchInput.focus();
-    fetchData();
-});
-
-// ── Theme toggle ─────────────────────────────────────────────────
+// ── Theme ──────────────────────────────────────────────────────
 function applyTheme(theme) {
     currentTheme = theme;
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-    UI.themeIconDark.classList.toggle('hidden', theme === 'light');
-    UI.themeIconLight.classList.toggle('hidden', theme === 'dark');
+    localStorage.setItem('fs-theme', theme);
+    UI.themeMoon.classList.toggle('hidden', theme === 'light');
+    UI.themeSun.classList.toggle('hidden', theme === 'dark');
 }
 
-UI.themeBtn.addEventListener('click', () => {
-    applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+UI.themeBtn.addEventListener('click', () => applyTheme(currentTheme === 'dark' ? 'light' : 'dark'));
+$('mobile-theme-btn').addEventListener('click', () => applyTheme(currentTheme === 'dark' ? 'light' : 'dark'));
+
+// ── Search ─────────────────────────────────────────────────────
+let searchOpen = false;
+UI.searchToggle.addEventListener('click', () => {
+    searchOpen = !searchOpen;
+    UI.searchWrap.classList.toggle('search-open', searchOpen);
+    if (searchOpen) UI.searchInput.focus();
+    else { UI.searchInput.value = ''; searchQuery = ''; UI.searchClear.classList.add('hidden'); fetchData(); }
+});
+UI.searchInput.addEventListener('input', () => {
+    UI.searchClear.classList.toggle('hidden', !UI.searchInput.value);
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => { searchQuery = UI.searchInput.value.trim(); fetchData(); }, 250);
+});
+UI.searchClear.addEventListener('click', () => {
+    UI.searchInput.value = ''; searchQuery = ''; UI.searchClear.classList.add('hidden');
+    UI.searchInput.focus(); fetchData();
 });
 
-// ── Notifications ────────────────────────────────────────────────
+// ── Notifications ──────────────────────────────────────────────
 UI.notifyBtn.addEventListener('click', async () => {
-    if (!('Notification' in window)) {
-        alert('Notifications not supported in this browser.');
-        return;
-    }
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-        UI.notifyBtn.classList.add('notify-active');
-        UI.notifyBtn.title = 'Notifications enabled';
-        new Notification('🏒 Swehockey Live', { body: 'Score alerts are now enabled!' });
-    }
+    if (!('Notification' in window)) return alert('Not supported.');
+    const p = await Notification.requestPermission();
+    if (p === 'granted') { UI.notifyBtn.classList.add('notify-on'); new Notification('🏒 SweHockey Live', { body: 'Goal alerts enabled!' }); }
 });
 
-// ── Favorites filter ─────────────────────────────────────────────
-UI.favoritesFilterBtn.addEventListener('click', () => {
-    favoritesOnly = !favoritesOnly;
-    UI.favoritesFilterBtn.classList.toggle('active-sub', favoritesOnly);
+// ── Calendar ───────────────────────────────────────────────────
+UI.calendarBtn.addEventListener('click', () => {
+    UI.calendarInput.valueAsDate = currentDate;
+    UI.calendarInput.style.position = 'fixed';
+    UI.calendarInput.style.opacity = '0';
+    UI.calendarInput.style.pointerEvents = 'all';
+    UI.calendarInput.style.width = '1px';
+    UI.calendarInput.style.height = '1px';
+    UI.calendarInput.showPicker?.();
+    UI.calendarInput.click();
+});
+UI.calendarInput.addEventListener('change', () => {
+    const [y, m, d] = UI.calendarInput.value.split('-').map(Number);
+    currentDate = new Date(y, m - 1, d);
+    UI.calendarInput.style.pointerEvents = 'none';
+    buildDateStrip();
     fetchData();
 });
 
-// ── Scroll to top ────────────────────────────────────────────────
+// ── Standings sort ─────────────────────────────────────────────
+document.querySelectorAll('.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if (standingsSort.col === col) standingsSort.asc = !standingsSort.asc;
+        else { standingsSort.col = col; standingsSort.asc = false; }
+        document.querySelectorAll('.sortable').forEach(h => h.classList.toggle('active-sort', h.dataset.col === col));
+        fetchData();
+    });
+});
+
+// ── Status filter bar ──────────────────────────────────────────
+document.querySelectorAll('.filter-btn[data-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        currentFilter = btn.dataset.filter;
+        document.querySelectorAll('.filter-btn[data-filter]').forEach(b => b.classList.toggle('active', b === btn));
+        if (currentSection === 'games') fetchData();
+    });
+});
+
+// ── Stats sub-tabs ─────────────────────────────────────────────
+UI.statsScorersBtn.addEventListener('click', () => { currentStatsTab = 'scorers'; UI.statsScorersBtn.classList.add('active'); UI.statsGoaliesBtn.classList.remove('active'); fetchData(); });
+UI.statsGoaliesBtn.addEventListener('click', () => { currentStatsTab = 'goalies'; UI.statsGoaliesBtn.classList.add('active'); UI.statsScorersBtn.classList.remove('active'); fetchData(); });
+
+// ── Main nav ───────────────────────────────────────────────────
+document.querySelectorAll('.nav-tab[data-section]').forEach(btn => btn.addEventListener('click', () => { switchSection(btn.dataset.section); fetchData(); }));
+document.querySelectorAll('.mbn-btn[data-section]').forEach(btn => btn.addEventListener('click', () => { switchSection(btn.dataset.section); fetchData(); }));
+
+// ── Modal ──────────────────────────────────────────────────────
+const closeModalFn = () => { UI.modal.classList.add('hidden'); switchModalSection('summary'); };
+$('close-modal') && $('close-modal').addEventListener('click', closeModalFn);
+UI.modalBackdrop.addEventListener('click', closeModalFn);
+document.querySelectorAll('.modal-tab').forEach(btn => btn.addEventListener('click', () => switchModalSection(btn.dataset.modalSection)));
+
+// ── League change ──────────────────────────────────────────────
+UI.leagueSelect.addEventListener('change', () => { buildSidebar(); fetchData(); });
+UI.refreshBtn.addEventListener('click', fetchData);
+UI.retryBtn.addEventListener('click', fetchData);
+
+// ── Scroll to top ──────────────────────────────────────────────
 window.addEventListener('scroll', () => {
     UI.scrollTopBtn.classList.toggle('hidden', window.scrollY < 300);
 }, { passive: true });
+UI.scrollTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
 
-UI.scrollTopBtn.addEventListener('click', () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-});
-
-// ── Helpers ──────────────────────────────────────────────────────
-function setLoading(on, success = false) {
-    UI.statusText.textContent = on ? 'Updating…' : (success ? 'Live' : 'Error');
-    UI.statusPill.className = `status-pill ${success ? 'connected' : (on ? '' : 'error')}`;
-    UI.refreshBtn.classList.toggle('spinning', on);
-
-    if (success && currentSection === 'games' && currentView === 'live') {
-        UI.statusPill.classList.add('live-pulsing');
-    } else {
-        UI.statusPill.classList.remove('live-pulsing');
-    }
-
-    if (on) {
-        if (currentSection === 'games') {
-            UI.gamesContainer.innerHTML = '';
-            for (let i = 0; i < 6; i++) UI.gamesContainer.appendChild(UI.skeletonGameTemplate.content.cloneNode(true));
-        } else if (currentSection === 'standings') {
-            UI.standingsBody.innerHTML = '';
-            for (let i = 0; i < 14; i++) UI.standingsBody.appendChild(UI.skeletonTableTemplate.content.cloneNode(true));
-        } else if (currentSection === 'stats') {
-            UI.statsBody.innerHTML = '';
-            for (let i = 0; i < 10; i++) UI.statsBody.appendChild(UI.skeletonTableTemplate.content.cloneNode(true));
-        }
-    }
-}
-
-// ── Event Listeners ──────────────────────────────────────────────
-UI.leagueSelect.addEventListener('change', fetchData);
-UI.refreshBtn.addEventListener('click', fetchData);
-
-UI.liveBtn.addEventListener('click', () => {
-    currentView = 'live';
-    UI.liveBtn.classList.add('active-sub');
-    UI.scheduleBtn.classList.remove('active-sub');
-    fetchData();
-});
-
-UI.scheduleBtn.addEventListener('click', () => {
-    currentView = 'schedule';
-    UI.scheduleBtn.classList.add('active-sub');
-    UI.liveBtn.classList.remove('active-sub');
-    fetchData();
-});
-
-UI.statsScorersBtn.addEventListener('click', () => switchStatsTab('scorers'));
-UI.statsGoaliesBtn.addEventListener('click', () => switchStatsTab('goalies'));
-
-document.querySelectorAll('.modal-tab').forEach(btn => {
-    btn.addEventListener('click', e => switchModalSection(e.target.dataset.modalSection));
-});
-
-document.querySelectorAll('.nav-tab').forEach(btn => {
-    btn.addEventListener('click', e => switchSection(e.target.dataset.section));
-});
-
-UI.closeModal.addEventListener('click', () => {
-    UI.modal.classList.add('hidden');
-    switchModalSection('summary');
-});
-UI.backdrop.addEventListener('click', () => {
-    UI.modal.classList.add('hidden');
-    switchModalSection('summary');
-});
-
-UI.retryBtn.addEventListener('click', fetchData);
-
-// ── Init ─────────────────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────────
 applyTheme(currentTheme);
-updateDateDisplay();
+buildDateStrip();
+buildSidebar();
 fetchData();
