@@ -1034,6 +1034,9 @@ UI.calendarInput.addEventListener('change', () => {
 document.querySelectorAll('.sortable').forEach(th => {
     th.addEventListener('click', () => {
         const col = th.dataset.col;
+        if (standingsSort.col === col) standingsSort.asc = !standingsSort.asc;
+        else { standingsSort.col = col; standingsSort.asc = false; }
+
         document.querySelectorAll('.sortable').forEach(h => {
             h.classList.toggle('active-sort', h.dataset.col === col);
             h.classList.toggle('asc', h.dataset.col === col && standingsSort.asc);
