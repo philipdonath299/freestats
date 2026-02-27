@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swehockey Live Tracker</title>
+    <meta name="description" content="Live scores, standings and statistics for Swedish hockey leagues including SHL, HockeyAllsvenskan and more.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-inner">
+            <div class="logo">
+                <span class="logo-puck">🏒</span>
+                <span class="logo-text">Swehockey<strong>Live</strong></span>
+            </div>
+            <div class="header-right">
+                <!-- Search toggle -->
+                <div class="search-wrap" id="search-wrap">
+                    <button id="search-toggle-btn" class="icon-btn" title="Search">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                    </button>
+                    <input type="text" id="search-input" class="search-input" placeholder="Search team or player…" autocomplete="off">
+                    <button id="search-clear-btn" class="search-clear hidden">✕</button>
+                </div>
+
+                <!-- Notification bell -->
+                <button id="notify-btn" class="icon-btn" title="Enable match notifications">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
+                    </svg>
+                </button>
+
+                <!-- Theme toggle -->
+                <button id="theme-btn" class="icon-btn" title="Toggle theme">
+                    <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+                    </svg>
+                    <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="hidden">
+                        <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>
+                </button>
+
+                <div class="status-pill" id="status-pill">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Connecting…</span>
+                    <span id="last-updated-time" class="last-updated"></span>
+                </div>
+                <select id="league-select" class="league-select">
+                    <optgroup label="Tier 1 - Elite">
+                        <option value="18263">SHL</option>
+                        <option value="18266" selected>HockeyAllsvenskan</option>
+                    </optgroup>
+                    <optgroup label="Tier 2 - National">
+                        <option value="18264">Hockeyettan</option>
+                    </optgroup>
+                    <optgroup label="Tier 3 - Regional (Tvåan)">
+                        <option value="20368">HockeyTvåan Öst</option>
+                        <option value="20221">HockeyTvåan Norr</option>
+                    </optgroup>
+                    <optgroup label="Tier 4 - Regional (Trean)">
+                        <option value="19861">HockeyTrean Öst</option>
+                        <option value="19918">HockeyTrean Syd</option>
+                        <option value="20351">HockeyTrean Väst</option>
+                        <option value="18570">HockeyTrean Norr</option>
+                    </optgroup>
+                    <optgroup label="Tier 5 - Regional (Fyran)">
+                        <option value="20059">HockeyFyran Herr Stockholm</option>
+                    </optgroup>
+                </select>
+                <button id="refresh-btn" class="icon-btn refresh-btn" title="Refresh">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Tab Navigation -->
+        <nav class="main-nav">
+            <button id="nav-games" class="nav-tab active" data-section="games">
+                <svg viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h14a1 1 0 001-1V5a1 1 0 00-1-1H3zM10 8a2 2 0 100 4 2 2 0 000-4z" />
+                </svg>
+                Games
+            </button>
+            <button id="nav-standings" class="nav-tab" data-section="standings">
+                <svg viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 10a8 8 0 1116 0A8 8 0 012 10zm6-3a1 1 0 112 0v2H8a1 1 0 010-2zm1 5a1 1 0 100 2 1 1 0 000-2z" />
+                </svg>
+                Standings
+            </button>
+            <button id="nav-stats" class="nav-tab" data-section="stats">
+                <svg viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zm6-3a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+                </svg>
+                Statistics
+            </button>
+        </nav>
+    </header>
+
+    <div class="content-wrapper">
+
+        <!-- GAMES SECTION -->
+        <section id="section-games" class="tab-section active-section">
+            <!-- Date Navigator -->
+            <div class="date-nav" id="date-nav">
+                <button id="date-prev-btn" class="date-btn" title="Previous day">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+                <button id="date-today-btn" class="date-label-btn">
+                    <span id="date-display">Today</span>
+                </button>
+                <button id="date-next-btn" class="date-btn" title="Next day">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+            </div>
+
+            <div class="sub-nav">
+                <button id="live-view-btn" class="sub-tab active-sub">Live &amp; Upcoming</button>
+                <button id="schedule-view-btn" class="sub-tab">Past Results</button>
+                <button id="favorites-filter-btn" class="sub-tab fav-filter-btn" title="Show only favourited teams">⭐ Favorites</button>
+            </div>
+            <div id="games-container" class="games-list">
+                <!-- game rows injected here -->
+            </div>
+        </section>
+
+        <!-- STANDINGS SECTION -->
+        <section id="section-standings" class="tab-section">
+            <div class="table-wrapper">
+                <table class="data-table" id="standings-table">
+                    <thead>
+                        <tr>
+                            <th class="col-rank">#</th>
+                            <th class="col-team text-left">Club</th>
+                            <th title="Games Played">GP</th>
+                            <th title="Won">W</th>
+                            <th title="Tied (OT/SO)">T</th>
+                            <th title="Lost">L</th>
+                            <th title="Goal Difference" class="col-gd">GD</th>
+                            <th title="Total Points"><strong>TP</strong></th>
+                            <th title="Form" style="width: 110px;">Form</th>
+                            <th title="Favourite" style="width:36px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="standings-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- STATISTICS SECTION -->
+        <section id="section-stats" class="tab-section">
+            <div class="sub-nav">
+                <button id="stats-scorers-btn" class="sub-tab active-sub" data-stats="scorers">Scoring Leaders</button>
+                <button id="stats-goalies-btn" class="sub-tab" data-stats="goalies">Goalies (SVS%)</button>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table" id="stats-table">
+                    <thead>
+                        <tr id="stats-header">
+                            <!-- Header injected by JS -->
+                        </tr>
+                    </thead>
+                    <tbody id="stats-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Error state -->
+        <div id="error-container" class="error-banner hidden">
+            <span>⚠️ Failed to load data. The proxy server may not be running.</span>
+            <button id="retry-btn" class="retry-btn">Retry</button>
+        </div>
+
+    </div>
+
+    <!-- Match detail modal -->
+    <div id="game-modal" class="modal hidden">
+        <div id="modal-backdrop" class="modal-backdrop"></div>
+        <div class="modal-panel">
+            <button id="close-modal" class="modal-close">✕</button>
+            <div class="modal-tabs">
+                <button class="modal-tab active" data-modal-section="summary">Summary</button>
+                <button class="modal-tab" data-modal-section="lineups">Lineups</button>
+                <button class="modal-tab" data-modal-section="h2h">H2H</button>
+            </div>
+            <div id="modal-body"></div>
+            <div id="modal-lineups" class="hidden"></div>
+            <div id="modal-h2h" class="hidden"></div>
+        </div>
+    </div>
+
+    <!-- Scroll to top button -->
+    <button id="scroll-top-btn" class="scroll-top-btn hidden" title="Back to top">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
+            <path d="M18 15l-6-6-6 6"/>
+        </svg>
+    </button>
+
+    <!-- Game row template -->
+    <template id="game-row-template">
+        <div class="game-row">
+            <div class="game-row-meta">
+                <span class="gr-time"></span>
+                <span class="gr-status"></span>
+            </div>
+            <div class="game-row-teams">
+                <div class="gr-team home">
+                    <div class="gr-team-left">
+                        <button class="fav-star" title="Favourite this team" aria-label="Toggle favourite">☆</button>
+                        <span class="gr-name"></span>
+                    </div>
+                    <span class="gr-score"></span>
+                </div>
+                <div class="gr-team away">
+                    <div class="gr-team-left">
+                        <button class="fav-star" title="Favourite this team" aria-label="Toggle favourite">☆</button>
+                        <span class="gr-name"></span>
+                    </div>
+                    <span class="gr-score"></span>
+                </div>
+            </div>
+            <div class="game-row-actions">
+                <button class="stats-btn">Stats</button>
+            </div>
+        </div>
+    </template>
+
+    <template id="skeleton-game-template">
+        <div class="game-row skeleton">
+            <div class="game-row-meta">
+                <div class="skeleton-box pulse" style="width: 32px; height: 12px; margin-bottom: 4px;"></div>
+                <div class="skeleton-box pulse" style="width: 24px; height: 10px;"></div>
+            </div>
+            <div class="game-row-teams">
+                <div class="gr-team">
+                    <div class="skeleton-box pulse" style="width: 120px; height: 14px;"></div>
+                    <div class="skeleton-box pulse" style="width: 20px; height: 14px;"></div>
+                </div>
+                <div class="gr-team">
+                    <div class="skeleton-box pulse" style="width: 100px; height: 14px;"></div>
+                    <div class="skeleton-box pulse" style="width: 20px; height: 14px;"></div>
+                </div>
+            </div>
+            <div class="game-row-actions">
+                <div class="skeleton-box pulse" style="width: 28px; height: 28px; border-radius: 50%;"></div>
+            </div>
+        </div>
+    </template>
+
+    <template id="skeleton-table-template">
+        <tr class="skeleton">
+            <td><div class="skeleton-box pulse" style="width: 20px; height: 14px; margin: 0 auto;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 100px; height: 14px;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 20px; height: 14px; margin: 0 auto;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 20px; height: 14px; margin: 0 auto;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 20px; height: 14px; margin: 0 auto;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 20px; height: 14px; margin: 0 auto;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 20px; height: 14px; margin: 0 auto;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 20px; height: 14px; margin: 0 auto;"></div></td>
+            <td><div class="skeleton-box pulse" style="width: 80px; height: 14px; margin: 0 auto;"></div></td>
+        </tr>
+    </template>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
