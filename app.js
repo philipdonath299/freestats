@@ -89,7 +89,26 @@ let liveClockMap = {};             // gameId → {startTs, periodElapsed}
 let clockInterval = null;
 let watchedGames = new Set();
 let favorites = new Set(JSON.parse(localStorage.getItem('fs-favs') || '[]'));
+let pinnedMatches = new Set(JSON.parse(localStorage.getItem('fs-pinned') || '[]'));
 let modalGame = null;
+
+// ── Audio ──────────────────────────────────────────────────────
+function playGoalSound() {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+    } catch (e) { }
+}
 
 // ── Date helpers ───────────────────────────────────────────────
 function todayDate() {
@@ -472,8 +491,11 @@ function detectScoreChanges(games) {
                 setTimeout(() => row.classList.remove('score-flash'), 2500);
             }
             // Notification
-            if (watchedGames.has(g.realId) && Notification.permission === 'granted') {
-                new Notification('🏒 Goal!', { body: `${g.home.name} ${g.home.score} – ${g.away.score} ${g.away.name}` });
+            if (watchedGames.has(g.realId) || watchedGames.has(g.id)) {
+                if (Notification.permission === 'granted') {
+                    new Notification('🏒 Goal!', { body: `${g.home.name} ${g.home.score} – ${g.away.score} ${g.away.name}` });
+                }
+                playGoalSound();
             }
         }
         prevScores[g.id] = { home: g.home.score, away: g.away.score };
@@ -618,92 +640,111 @@ function renderGames(games) {
         return;
     }
 
-    // League header
-    const banner = document.createElement('div');
-    banner.className = 'league-banner';
-    banner.innerHTML = `<span class="lb-flag">🇸🇪</span><span class="lb-country">Sweden</span><span class="lb-name">${getLeagueName(UI.leagueSelect.value)}</span><span class="lb-count">${filtered.length} game${filtered.length !== 1 ? 's' : ''}</span>`;
-    UI.gamesContainer.appendChild(banner);
+    const pinnedGames = filtered.filter(g => pinnedMatches.has(g.id));
+    const normalGames = filtered.filter(g => !pinnedMatches.has(g.id));
 
-    filtered.forEach(g => {
-        const clone = UI.gameRowTpl.content.cloneNode(true);
-        const row = clone.querySelector('.game-row');
-        row.dataset.gameId = g.id;
+    const renderGroup = (groupGames, bannerHTML) => {
+        if (!groupGames.length) return;
+        const banner = document.createElement('div');
+        banner.className = 'league-banner';
+        banner.innerHTML = bannerHTML;
+        UI.gamesContainer.appendChild(banner);
 
-        const lo = g.status.toLowerCase();
-        const isLive = isLiveStatus(g.status);
-        const isFinal = g.status === 'Final';
+        groupGames.forEach(g => {
+            const clone = UI.gameRowTpl.content.cloneNode(true);
+            const row = clone.querySelector('.game-row');
+            row.dataset.gameId = g.id;
 
-        if (isLive) row.classList.add('is-live');
-        else if (isFinal) row.classList.add('is-final');
-        else row.classList.add('is-scheduled');
+            const lo = g.status.toLowerCase();
+            const isLive = isLiveStatus(g.status);
+            const isFinal = g.status === 'Final';
 
-        // Status column
-        const periodEl = row.querySelector('.gr-period');
-        const clockEl = row.querySelector('.gr-clock');
-        const dotEl = row.querySelector('.live-dot');
+            if (isLive) row.classList.add('is-live');
+            else if (isFinal) row.classList.add('is-final');
+            else row.classList.add('is-scheduled');
 
-        if (isLive) {
-            // Extract period abbreviation
-            const pm = g.status.match(/(Period \d+|Overtime|OT|GWS)/i);
-            const pLabel = pm ? pm[0].replace('Period ', '').replace('1', '1st').replace('2', '2nd').replace('3', '3rd') : 'LIVE';
-            periodEl.textContent = pLabel;
-            clockEl.textContent = '00:00';
-            dotEl.classList.remove('hidden');
-        } else if (isFinal) {
-            periodEl.textContent = 'FT';
-            clockEl.textContent = '';
-        } else {
-            periodEl.textContent = '';
-            clockEl.textContent = g.time;
-        }
+            // Status column
+            const periodEl = row.querySelector('.gr-period');
+            const clockEl = row.querySelector('.gr-clock');
+            const dotEl = row.querySelector('.live-dot');
 
-        // Teams
-        const [homeRow, awayRow] = row.querySelectorAll('.gr-team');
-        homeRow.querySelector('.gr-name').textContent = g.home.name;
-        awayRow.querySelector('.gr-name').textContent = g.away.name;
-
-        const hScore = row.querySelectorAll('.gr-score')[0];
-        const aScore = row.querySelectorAll('.gr-score')[1];
-        hScore.textContent = g.home.score;
-        aScore.textContent = g.away.score;
-
-        if (isFinal) {
-            const h = parseInt(g.home.score) || 0, a = parseInt(g.away.score) || 0;
-            if (h > a) { homeRow.classList.add('winner'); hScore.classList.add('winner-score'); }
-            else if (a > h) { awayRow.classList.add('winner'); aScore.classList.add('winner-score'); }
-        }
-
-        // Fav stars
-        const [hStar, aStar] = row.querySelectorAll('.fav-star');
-        updateStar(hStar, g.home.name);
-        updateStar(aStar, g.away.name);
-        hStar.addEventListener('click', e => { e.stopPropagation(); toggleFav(g.home.name, hStar); });
-        aStar.addEventListener('click', e => { e.stopPropagation(); toggleFav(g.away.name, aStar); });
-
-        // Info button + row click
-        const infoBtn = row.querySelector('.gr-info-btn');
-        if (g.realId) {
-            infoBtn.addEventListener('click', e => { e.stopPropagation(); fetchMatchDetails(g); });
-            row.addEventListener('click', () => fetchMatchDetails(g));
-            // Watch bell for live games
             if (isLive) {
-                const wb = document.createElement('button');
-                wb.className = `watch-btn${watchedGames.has(g.realId) ? ' watching' : ''}`;
-                wb.title = watchedGames.has(g.realId) ? 'Stop alerts' : 'Alert on goal';
-                wb.textContent = '🔔';
-                wb.addEventListener('click', e => {
-                    e.stopPropagation();
-                    watchedGames.has(g.realId) ? watchedGames.delete(g.realId) : watchedGames.add(g.realId);
-                    wb.classList.toggle('watching');
-                });
-                row.querySelector('.gr-actions').prepend(wb);
+                // Extract period abbreviation
+                const pm = g.status.match(/(Period \d+|Overtime|OT|GWS)/i);
+                const pLabel = pm ? pm[0].replace('Period ', '').replace('1', '1st').replace('2', '2nd').replace('3', '3rd') : 'LIVE';
+                periodEl.textContent = pLabel;
+                clockEl.textContent = '00:00';
+                dotEl.classList.remove('hidden');
+            } else if (isFinal) {
+                periodEl.textContent = 'FT';
+                clockEl.textContent = '';
+            } else {
+                periodEl.textContent = '';
+                clockEl.textContent = g.time;
             }
-        } else {
-            infoBtn.style.display = 'none';
-        }
 
-        UI.gamesContainer.appendChild(clone);
-    });
+            // Teams
+            const [homeRow, awayRow] = row.querySelectorAll('.gr-team');
+            homeRow.querySelector('.gr-name').textContent = g.home.name;
+            awayRow.querySelector('.gr-name').textContent = g.away.name;
+
+            const hScore = row.querySelectorAll('.gr-score')[0];
+            const aScore = row.querySelectorAll('.gr-score')[1];
+            hScore.textContent = g.home.score;
+            aScore.textContent = g.away.score;
+
+            if (isFinal) {
+                const h = parseInt(g.home.score) || 0, a = parseInt(g.away.score) || 0;
+                if (h > a) { homeRow.classList.add('winner'); hScore.classList.add('winner-score'); }
+                else if (a > h) { awayRow.classList.add('winner'); aScore.classList.add('winner-score'); }
+            }
+
+            // Fav stars
+            const [hStar, aStar] = row.querySelectorAll('.fav-star');
+            updateStar(hStar, g.home.name);
+            updateStar(aStar, g.away.name);
+            hStar.addEventListener('click', e => { e.stopPropagation(); toggleFav(g.home.name, hStar); });
+            aStar.addEventListener('click', e => { e.stopPropagation(); toggleFav(g.away.name, aStar); });
+
+            // Info button + row click
+            const infoBtn = row.querySelector('.gr-info-btn');
+            if (g.realId) {
+                infoBtn.addEventListener('click', e => { e.stopPropagation(); fetchMatchDetails(g); });
+                row.addEventListener('click', () => fetchMatchDetails(g));
+                // Watch bell for live games
+                if (isLive) {
+                    const wb = document.createElement('button');
+                    wb.className = `watch-btn${watchedGames.has(g.realId) ? ' watching' : ''}`;
+                    wb.title = watchedGames.has(g.realId) ? 'Stop alerts' : 'Alert on goal';
+                    wb.textContent = '🔔';
+                    wb.addEventListener('click', e => {
+                        e.stopPropagation();
+                        watchedGames.has(g.realId) ? watchedGames.delete(g.realId) : watchedGames.add(g.realId);
+                        wb.classList.toggle('watching');
+                    });
+                    row.querySelector('.gr-actions').prepend(wb);
+                }
+            } else {
+                infoBtn.style.display = 'none';
+            }
+
+            // Match pin star
+            const matchStar = row.querySelector('.match-star');
+            matchStar.classList.toggle('is-pinned', pinnedMatches.has(g.id));
+            matchStar.addEventListener('click', e => {
+                e.stopPropagation();
+                if (pinnedMatches.has(g.id)) pinnedMatches.delete(g.id);
+                else pinnedMatches.add(g.id);
+                localStorage.setItem('fs-pinned', JSON.stringify([...pinnedMatches]));
+                renderGames(games); // re-render to sort immediately
+            });
+
+            UI.gamesContainer.appendChild(clone);
+        });
+    };
+
+    renderGroup(pinnedGames, `<span class="lb-flag">📌</span><span class="lb-name" style="margin-left:8px">My Matches</span><span class="lb-count">${pinnedGames.length}</span>`);
+    renderGroup(normalGames, `<span class="lb-flag">🇸🇪</span><span class="lb-country">Sweden</span><span class="lb-name">${getLeagueName(UI.leagueSelect.value)}</span><span class="lb-count">${normalGames.length}</span>`);
 }
 
 function updateStar(btn, name) {

@@ -680,7 +680,7 @@ svg {
 /* Game row */
 .game-row {
     display: grid;
-    grid-template-columns: 70px 1fr 42px;
+    grid-template-columns: 28px 70px 1fr 42px;
     align-items: center;
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -750,6 +750,30 @@ svg {
 
 .game-row.is-final .gr-period {
     color: var(--text-3)
+}
+
+/* Match pin star */
+.match-star {
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font-size: 14px;
+    cursor: pointer;
+    transition: color var(--t);
+    padding: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    border-right: 1px solid var(--border);
+    opacity: 0.35;
+}
+
+.match-star:hover,
+.match-star.is-pinned {
+    color: var(--accent);
+    opacity: 1;
 }
 
 /* Live dot */
@@ -1760,6 +1784,10 @@ tr.skeleton td {
 
     .gr-score {
         font-size: 14px
+    }
+
+    .game-row {
+        grid-template-columns: 26px 64px 1fr 36px;
     }
 
     .filter-btn {
